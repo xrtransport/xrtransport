@@ -723,7 +723,7 @@ void handle_release_swapchain_image(MessageLockIn msg_in) {
     }};
 
     auto& src_acquire_barrier = image_barriers[0];
-    src_acquire_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    src_acquire_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL; // TODO: need to read this from the client because it could be GENERAL if the client is OpenGL
     src_acquire_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     src_acquire_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
     src_acquire_barrier.dstQueueFamilyIndex = queue_family_index;
