@@ -23,8 +23,7 @@ private:
     Transport transport;
     FunctionLoader function_loader;
     FunctionDispatch function_dispatch;
-    std::vector<Module> modules;
-    asio::io_context& transport_io_context;
+    std::vector<LoadedModule> modules;
     XrInstance saved_instance;
 
     // Custom handler of xrCreateInstance provided to FunctionDispatch via dependency injection
@@ -38,7 +37,7 @@ private:
     XrResult (*to_platform_time)(XrInstance instance, XrTime time, XRTRANSPORT_PLATFORM_TIME* platform_time) = nullptr;
 
 public:
-    explicit Server(std::unique_ptr<SyncDuplexStream> stream, asio::io_context& stream_io_context, std::vector<std::string> module_paths);
+    explicit Server(std::unique_ptr<SyncDuplexStream> stream);
 
     static bool do_handshake(SyncDuplexStream& stream);
 

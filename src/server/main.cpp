@@ -29,76 +29,6 @@ using asio::local::stream_protocol;
 using namespace xrtransport;
 namespace fs = std::filesystem;
 
-std::string exe_path() {
-#ifdef _WIN32
-    // Get UTF-16 path
-    wchar_t wbuf[MAX_PATH];
-    DWORD len = GetModuleFileNameW(nullptr, wbuf, MAX_PATH);
-    if (len == 0)
-        throw std::runtime_error("GetModuleFileNameW failed");
-
-    std::wstring ws(wbuf, len);
-
-    // Convert UTF-16 -> UTF-8
-    int size = WideCharToMultiByte(
-        CP_UTF8, 0,
-        ws.c_str(), static_cast<int>(ws.size()),
-        nullptr, 0, nullptr, nullptr
-    );
-    if (size == 0)
-        throw std::runtime_error("WideCharToMultiByte sizing failed");
-
-    std::string utf8(size, '\0');
-    WideCharToMultiByte(
-        CP_UTF8, 0,
-        ws.c_str(), static_cast<int>(ws.size()),
-        utf8.data(), size, nullptr, nullptr
-    );
-    return utf8;
-
-#elif __linux__
-    char buf[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf));
-    if (len == -1)
-        throw std::runtime_error("readlink failed");
-    return std::string(buf, len);
-
-#endif
-}
-
-static inline bool is_filename_module(std::string_view filename) {
-#ifdef _WIN32
-    constexpr std::string_view module_prefix = "module_";
-    constexpr std::string_view module_ext = ".dll";
-#elif __linux__
-    constexpr std::string_view module_prefix = "libmodule_";
-    constexpr std::string_view module_ext = ".so";
-#endif
-    bool prefix_matches = filename.size() >= module_prefix.size()
-        && std::equal(module_prefix.begin(), module_prefix.end(), filename.begin());
-    bool ext_matches = filename.size() >= module_ext.size()
-        && std::equal(module_ext.rbegin(), module_ext.rend(), filename.rbegin());
-    
-    return prefix_matches && ext_matches;
-}
-
-static std::vector<std::string> collect_module_paths() {
-    fs::path exe_dir = fs::path(exe_path()).parent_path();
-
-    std::vector<std::string> results;
-
-    assert(fs::exists(exe_dir) && fs::is_directory(exe_dir));
-
-    for (const auto& entry : fs::directory_iterator(exe_dir)) {
-        if (!entry.is_regular_file()) continue;
-        const fs::path& p = entry.path();
-        if (!is_filename_module(entry.path().filename().string())) continue;
-        results.push_back(p.string());
-    }
-
-    return results;
-}
-
 static void print_usage() {
     std::cout << "Usage:\n";
     std::cout << "xrtransport_server_main tcp [bind_addr] [port]\n";
@@ -208,9 +138,7 @@ int main(int argc, char** argv) {
             }
             
             Server server(
-                std::move(stream),
-                io_context,
-                collect_module_paths()
+                std::move(stream)
             );
 
             // Run server event loop synchronously until it stops

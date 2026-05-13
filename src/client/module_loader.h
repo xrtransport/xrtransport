@@ -3,7 +3,9 @@
 #ifndef XRTRANSPORT_CLIENT_MODULE_LOADER_H
 #define XRTRANSPORT_CLIENT_MODULE_LOADER_H
 
-#include "xrtransport/client/module_types.h"
+#include <memory>
+
+#include "xrtransport/client/module_interface.h"
 #include "xrtransport/transport/transport_c_api.h"
 
 #include "function_table.h"
@@ -14,7 +16,12 @@
 
 namespace xrtransport {
 
-std::vector<ModuleInfo> load_modules(xrtp_Transport transport);
+struct LoadedModule {
+    // no need to keep library handle because library stays loaded
+    std::unique_ptr<ClientModule> module;
+};
+
+std::vector<LoadedModule> load_modules(xrtp_Transport transport);
 
 } // namespace xrtransport
 

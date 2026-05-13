@@ -9,7 +9,14 @@ message(STATUS "Building xrtransport server components")
 add_library(xrtransport_server STATIC
     server.cpp
     function_dispatch.cpp
+    module_loader.cpp
 )
+
+if(XRTRANSPORT_DYNAMIC_MODULES)
+    target_compile_definitions(xrtransport_server PRIVATE XRTRANSPORT_DYNAMIC_MODULES)
+else()
+    target_link_libraries(xrtransport_server PUBLIC static_server_modules)
+endif()
 
 # Dependencies
 target_link_libraries(xrtransport_server PUBLIC

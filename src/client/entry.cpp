@@ -9,7 +9,6 @@
 
 #include "xrtransport/serialization/deserializer.h"
 #include "xrtransport/extensions/extension_functions.h"
-#include "xrtransport/client/module_types.h"
 #include "xrtransport/time.h"
 #include "xrtransport/api.h"
 
@@ -95,7 +94,7 @@ static XRAPI_ATTR XrResult XRAPI_CALL xrPollEventImpl(
 // custom xrtransport functions for API layers
 static XRAPI_ATTR XrResult XRAPI_CALL xrtransportGetTransport(xrtp_Transport* transport_out);
 
-static std::vector<ModuleInfo> modules_info;
+static std::vector<LoadedModule> modules;
 static std::unordered_map<std::string, ExtensionInfo> available_extensions;
 
 static XrInstance saved_instance = XR_NULL_HANDLE;
@@ -260,7 +259,8 @@ static XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstanceImpl(const XrInstanceCreat
     // The server should not be able to see these.
 
     std::unordered_set<std::string> provided_extensions;
-    for (auto& module_info : modules_info) {
+    for (auto& module : modules) {
+        auto& module_info = *module.module->get_module_info();
         for (uint32_t i = 0; i < module_info.num_extensions; i++) {
             auto& extension = module_info.extensions[i];
             provided_extensions.emplace(extension.extension_name);
@@ -298,9 +298,8 @@ static XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstanceImpl(const XrInstanceCreat
         enable_synchronization();
 
         // run instance callback on all modules
-        for (const auto& module_info : modules_info) {
-            if (module_info.instance_callback)
-                module_info.instance_callback(saved_instance, xrGetInstanceProcAddrImpl);
+        for (const auto& module : modules) {
+            module.module->on_instance(saved_instance, xrGetInstanceProcAddrImpl);
         }
     }
     else {
@@ -326,8 +325,9 @@ static void layer_built_in_functions(FunctionTable& function_table) {
     function_table.add_function_layer("xrtransportGetTransport", xrtransportGetTransport, dummy_next);
 }
 
-static void layer_module_functions(FunctionTable& function_table, const std::vector<ModuleInfo>& modules_info) {
-    for (const auto& module_info : modules_info) {
+static void layer_module_functions(FunctionTable& function_table, const std::vector<LoadedModule>& modules) {
+    for (const auto& module : modules) {
+        auto& module_info = *module.module->get_module_info();
         for (uint32_t i = 0; i < module_info.num_functions; i++) {
             const auto& function = module_info.functions[i];
             function_table.add_function_layer(function.function_name, function.new_function, *function.old_function);
@@ -359,13 +359,13 @@ extern "C" XRTP_API_EXPORT XrResult XRAPI_CALL xrNegotiateLoaderRuntimeInterface
     layer_built_in_functions(function_table);
 
     // Load modules
-    modules_info = load_modules(get_runtime().get_transport().get_handle());
+    modules = load_modules(get_runtime().get_transport().get_handle());
 
     // Collect available extensions
-    available_extensions = collect_available_extensions(modules_info);
+    available_extensions = collect_available_extensions(modules);
 
     // Layer module functions onto function table
-    layer_module_functions(function_table, modules_info);
+    layer_module_functions(function_table, modules);
 
     runtimeRequest->getInstanceProcAddr = xrGetInstanceProcAddrImpl;
     runtimeRequest->runtimeInterfaceVersion = XR_CURRENT_LOADER_API_LAYER_VERSION;

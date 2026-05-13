@@ -12,7 +12,6 @@
 
 #include <unordered_map>
 #include <string>
-#include <cstdint>
 #include <vector>
 #include <algorithm>
 
@@ -80,13 +79,14 @@ static std::unordered_map<std::string, ExtensionInfo> collect_rpc_available_exte
     return rpc_available_extensions;
 }
 
-std::unordered_map<std::string, ExtensionInfo> collect_available_extensions(std::vector<ModuleInfo> modules_info) {
+std::unordered_map<std::string, ExtensionInfo> collect_available_extensions(const std::vector<LoadedModule>& modules) {
     // gather (runtime) available extensions and add extensions provided by modules.
     // module extensions override ones provided by the runtime. If multiple modules define the same
     // extension, the last one will overwrite the others, but this should be fine if they all define the
     // same functions.
     auto result = collect_rpc_available_extensions();
-    for (const auto& module_info : modules_info) {
+    for (const auto& module : modules) {
+        auto& module_info = *module.module->get_module_info();
         for (uint32_t i = 0; i < module_info.num_extensions; i++) {
             const ModuleExtension& extension = module_info.extensions[i];
             std::vector<std::string> extension_functions;

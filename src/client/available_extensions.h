@@ -3,7 +3,7 @@
 #ifndef XRTRANSPORT_AVAILABLE_EXTENSIONS_H
 #define XRTRANSPORT_AVAILABLE_EXTENSIONS_H
 
-#include "xrtransport/client/module_types.h"
+#include "module_loader.h"
 
 #include <unordered_map>
 #include <vector>
@@ -17,7 +17,7 @@ struct ExtensionInfo {
     std::vector<std::string> function_names;
 };
 
-std::unordered_map<std::string, ExtensionInfo> collect_available_extensions(std::vector<ModuleInfo> modules_info);
+std::unordered_map<std::string, ExtensionInfo> collect_available_extensions(const std::vector<LoadedModule>& modules_info);
 
 }
 

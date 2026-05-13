@@ -2,8 +2,10 @@
 
 #include "vulkan_common.h"
 #include "vulkan_core.h"
+#include "vulkan_client_module_factory.h"
 
 #include "xrtransport/client/module_interface.h"
+#include "xrtransport/client/module_signature.h"
 
 #include "xrtransport/transport/transport.h"
 #include "xrtransport/serialization/serializer.h"
@@ -202,7 +204,6 @@ ModuleInfo module_info {
     .extensions = extensions,
     .num_functions = sizeof(functions) / sizeof(ModuleLayerFunction),
     .functions = functions,
-    .instance_callback = instance_callback,
 };
 
 // Static data
@@ -212,12 +213,25 @@ XrInstance saved_xr_instance = XR_NULL_HANDLE;
 VkInstance saved_vk_instance = VK_NULL_HANDLE;
 PFN_vkGetInstanceProcAddr pfn_vkGetInstanceProcAddr;
 
-// Function implementations
+// Module interface
+class VulkanClientModule : public ClientModule {
+public:
+    explicit VulkanClientModule(xrtp_Transport transport_handle) {
+        transport = std::make_unique<Transport>(transport_handle);
+        vulkan_core::set_transport(transport_handle);
+    }
 
-void instance_callback(XrInstance instance, PFN_xrGetInstanceProcAddr pfn) {
-    vulkan_core::set_xr_instance(instance);
-    saved_xr_instance = instance;
-}
+    const ModuleInfo* get_module_info() override {
+        return &module_info;
+    }
+
+    void on_instance(XrInstance instance, PFN_xrGetInstanceProcAddr pfn_xrGetInstanceProcAddr) override {
+        vulkan_core::set_xr_instance(instance);
+        saved_xr_instance = instance;
+    }
+};
+
+// Function implementations
 
 XrResult return_string_buffer(
     const char* buffer,
@@ -566,12 +580,21 @@ XrResult xrGetVulkanGraphicsRequirements2KHRImpl(
 
 } // namespace vulkan
 
-// Entry point
-XRTP_API_EXPORT void xrtp_get_module_info(
-    xrtp_Transport transport_handle,
-    const ModuleInfo** info_out)
-{
-    vulkan::transport = std::make_unique<Transport>(transport_handle);
-    vulkan_core::set_transport(transport_handle);
-    *info_out = &vulkan::module_info;
+namespace xrtransport {
+
+std::unique_ptr<ClientModule> VulkanClientModuleFactory::create(xrtp_Transport transport_handle) {
+    return std::make_unique<vulkan::VulkanClientModule>(transport_handle);
 }
+
+} // namespace xrtransport
+
+#ifdef XRTRANSPORT_DYNAMIC_MODULES
+
+// Dynamic module entry point
+XRTP_API_EXPORT ClientModule* xrtp_get_client_module(
+    xrtp_Transport transport_handle)
+{
+    return VulkanClientModuleFactory::create(transport_handle).release();
+}
+
+#endif

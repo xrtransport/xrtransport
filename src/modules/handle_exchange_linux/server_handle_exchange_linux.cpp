@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
+#include "server_handle_exchange_factory.h"
 #include "xrtransport/server/module_interface.h"
+#include "xrtransport/server/module_signature.h"
 #include "xrtransport/handle_exchange.h"
 #include "messages.h"
 
@@ -26,120 +28,138 @@ using namespace xrtransport;
 
 namespace {
 
-std::unique_ptr<Transport> transport;
 int server_fd = -1;
 int socket_fd = -1;
 
+class HandleExchangeServerModule : public ServerModule {
+private:
+    Transport transport;
+public:
+    HandleExchangeServerModule(xrtp_Transport transport_handle)
+    : transport(transport_handle) {
+        transport.register_handler(XRTP_MSG_HANDLE_EXCHANGE_LINUX_GET_PATH, [&](MessageLockIn msg_in){
+            const char* client_path = std::getenv("XRTP_CLIENT_FD_EXCHANGE_PATH");
+            if (!client_path) {
+                spdlog::error("XRTP_CLIENT_FD_EXCHANGE_PATH environment variable not set");
+            }
+
+            auto msg_out = transport.start_message(XRTP_MSG_HANDLE_EXCHANGE_LINUX_RETURN_PATH);
+            SerializeContext s_ctx(msg_out.buffer);
+            serialize_ptr(client_path, count_null_terminated(client_path), s_ctx);
+            msg_out.flush();
+        });
+        transport.register_handler(XRTP_MSG_HANDLE_EXCHANGE_LINUX_CLIENT_CONNECTING, [&](MessageLockIn msg_in){
+            socket_fd = accept(server_fd, nullptr, nullptr);
+            if (socket_fd < 0) {
+                spdlog::error("Error accepting handle exchange client: {}", errno);
+            }
+        });
+    }
+
+    void get_required_extensions(uint32_t* num_extensions_out, const char** extensions_out) const override {
+        *num_extensions_out = 0;
+    }
+
+    void on_instance(XrInstance instance) override {
+        const char* server_path = std::getenv("XRTP_SERVER_FD_EXCHANGE_PATH");
+        if (!server_path) {
+            spdlog::error("XRTP_SERVER_FD_EXCHANGE_PATH environment variable not set, "
+                "not starting handle exchange server.");
+            return;
+        }
+
+        if (server_fd >= 0) {
+            // close existing server socket if it's already open
+            close(server_fd);
+            server_fd = -1;
+        }
+        if (socket_fd >= 0) {
+            // close existing socket if it's already open
+            close(socket_fd);
+            socket_fd = -1;
+        }
+
+        server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (server_fd < 0) {
+            spdlog::error("Unable to create handle exchange server socket: {}", errno);
+            return;
+        }
+
+        unlink(server_path); // ignore error if any
+
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        std::strncpy(addr.sun_path, server_path, sizeof(addr.sun_path) - 1);
+
+        if (bind(server_fd, (sockaddr*)&addr, sizeof(addr)) < 0) {
+            spdlog::error("Unable to bind to handle exchange path: {}, errno: {}", server_path, errno);
+            close(server_fd);
+            server_fd = -1;
+            return;
+        }
+
+        // make it readable and writeable by anyone
+        chmod(server_path, 0666);
+
+        if (listen(server_fd, 1) < 0) {
+            spdlog::error("Error listening on handler exchange server socket: {}", errno);
+            close(server_fd);
+            server_fd = -1;
+            return;
+        }
+    }
+
+    void on_instance_destroy() override {
+        if (server_fd >= 0) {
+            close(server_fd);
+            server_fd = -1;
+        }
+        if (socket_fd >= 0) {
+            close(socket_fd);
+            socket_fd = -1;
+        }
+    }
+
+    ~HandleExchangeServerModule() override {
+        if (server_fd >= 0) {
+            close(server_fd);
+            server_fd = -1;
+        }
+        if (socket_fd >= 0) {
+            close(socket_fd);
+            socket_fd = -1;
+        }
+    }
 };
 
-bool xrtp_on_init(
-    xrtp_Transport transport_handle,
-    xrtransport::FunctionLoader* function_loader,
-    std::uint32_t num_extensions,
+} // namespace;
+
+namespace xrtransport {
+
+std::unique_ptr<ServerModule> HandleExchangeServerModuleFactory::create(
+    xrtp_Transport transport,
+    FunctionLoader* function_loader,
+    uint32_t num_extensions,
     const XrExtensionProperties* extensions
 ) {
-    transport = std::make_unique<Transport>(transport_handle);
-    transport->register_handler(XRTP_MSG_HANDLE_EXCHANGE_LINUX_GET_PATH, [&](MessageLockIn msg_in){
-        const char* client_path = std::getenv("XRTP_CLIENT_FD_EXCHANGE_PATH");
-        if (!client_path) {
-            spdlog::error("XRTP_CLIENT_FD_EXCHANGE_PATH environment variable not set");
-        }
-
-        auto msg_out = transport->start_message(XRTP_MSG_HANDLE_EXCHANGE_LINUX_RETURN_PATH);
-        SerializeContext s_ctx(msg_out.buffer);
-        serialize_ptr(client_path, count_null_terminated(client_path), s_ctx);
-        msg_out.flush();
-    });
-    transport->register_handler(XRTP_MSG_HANDLE_EXCHANGE_LINUX_CLIENT_CONNECTING, [&](MessageLockIn msg_in){
-        socket_fd = accept(server_fd, nullptr, nullptr);
-        if (socket_fd < 0) {
-            spdlog::error("Error accepting handle exchange client: {}", errno);
-        }
-    });
-    return true;
+    return std::make_unique<HandleExchangeServerModule>(transport);
 }
 
-void xrtp_get_required_extensions(
-    std::uint32_t* num_extensions_out,
-    const char** extensions_out
+} // namespace xrtransport
+
+#ifdef XRTRANSPORT_DYNAMIC_MODULES
+
+// dynamic module entry point
+ServerModule* xrtp_get_server_module(
+    xrtp_Transport transport,
+    FunctionLoader* function_loader,
+    uint32_t num_extensions,
+    const XrExtensionProperties* extensions
 ) {
-    *num_extensions_out = 0;
+    return HandleExchangeServerModuleFactory::create(transport, function_loader, num_extensions, extensions).release();
 }
 
-void xrtp_on_instance(
-    xrtp_Transport transport_handle,
-    xrtransport::FunctionLoader* function_loader,
-    XrInstance instance
-) {
-    const char* server_path = std::getenv("XRTP_SERVER_FD_EXCHANGE_PATH");
-    if (!server_path) {
-        spdlog::error("XRTP_SERVER_FD_EXCHANGE_PATH environment variable not set, "
-            "not starting handle exchange server.");
-        return;
-    }
-
-    if (server_fd >= 0) {
-        // close existing server socket if it's already open
-        close(server_fd);
-        server_fd = -1;
-    }
-    if (socket_fd >= 0) {
-        // close existing socket if it's already open
-        close(socket_fd);
-        socket_fd = -1;
-    }
-
-    server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (server_fd < 0) {
-        spdlog::error("Unable to create handle exchange server socket: {}", errno);
-        return;
-    }
-
-    unlink(server_path); // ignore error if any
-
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, server_path, sizeof(addr.sun_path) - 1);
-
-    if (bind(server_fd, (sockaddr*)&addr, sizeof(addr)) < 0) {
-        spdlog::error("Unable to bind to handle exchange path: {}, errno: {}", server_path, errno);
-        close(server_fd);
-        server_fd = -1;
-        return;
-    }
-
-    // make it readable and writeable by anyone
-    chmod(server_path, 0666);
-
-    if (listen(server_fd, 1) < 0) {
-        spdlog::error("Error listening on handler exchange server socket: {}", errno);
-        close(server_fd);
-        server_fd = -1;
-        return;
-    }
-}
-
-void xrtp_on_instance_destroy() {
-    if (server_fd >= 0) {
-        close(server_fd);
-        server_fd = -1;
-    }
-    if (socket_fd >= 0) {
-        close(socket_fd);
-        socket_fd = -1;
-    }
-}
-
-void xrtp_on_shutdown() {
-    if (server_fd >= 0) {
-        close(server_fd);
-        server_fd = -1;
-    }
-    if (socket_fd >= 0) {
-        close(socket_fd);
-        socket_fd = -1;
-    }
-}
+#endif
 
 xrtp_Handle xrtp_read_handle() {
     if (socket_fd < 0) {

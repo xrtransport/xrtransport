@@ -1,10 +1,17 @@
 # SPDX-License-Identifier: LGPL-3.0-or-later
 
 # Create static library for xrtransport transport
-add_library(xrtransport_transport SHARED
-    transport_impl.cpp
-    transport_c_api.cpp
-)
+if(XRTRANSPORT_DYNAMIC_MODULES)
+    add_library(xrtransport_transport SHARED
+        transport_impl.cpp
+        transport_c_api.cpp
+    )
+else()
+    add_library(xrtransport_transport STATIC
+        transport_impl.cpp
+        transport_c_api.cpp
+    )
+endif()
 
 # Set target properties for transport
 target_include_directories(xrtransport_transport PUBLIC

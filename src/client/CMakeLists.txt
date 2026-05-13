@@ -16,8 +16,14 @@ add_library(xrtransport_client SHARED
     module_loader.cpp
 )
 
+if(XRTRANSPORT_DYNAMIC_MODULES)
+    target_compile_definitions(xrtransport_client PRIVATE XRTRANSPORT_DYNAMIC_MODULES)
+else()
+    target_link_libraries(xrtransport_client PRIVATE static_client_modules)
+endif()
+
 # Dependencies
-target_link_libraries(xrtransport_client
+target_link_libraries(xrtransport_client PRIVATE
     xrtransport_transport
     xrtransport_serialization
     xrtransport_config

@@ -3,6 +3,8 @@
 #ifndef XRTRANSPORT_SERVER_MODULE_H
 #define XRTRANSPORT_SERVER_MODULE_H
 
+#include "xrtransport/server/module_signature.h"
+
 #ifdef _WIN32
     #include <windows.h>
     #define MODULE_HANDLE HMODULE
@@ -10,6 +12,7 @@
     #define MODULE_SYM(handle, name) GetProcAddress(handle, name)
     #define MODULE_UNLOAD(handle) FreeLibrary(handle)
     #define MODULE_EXT ".dll"
+    #define MODULE_NULL NULL
 #else
     #include <dlfcn.h>
     #define MODULE_HANDLE void*
@@ -17,127 +20,91 @@
     #define MODULE_SYM(handle, name) dlsym(handle, name)
     #define MODULE_UNLOAD(handle) dlclose(handle)
     #define MODULE_EXT ".so"
+    #define MODULE_NULL nullptr
 #endif
 
 #include "xrtransport/transport/transport.h"
 #include "xrtransport/server/function_loader.h"
 #include "openxr/openxr.h"
 
+#include <memory>
+
 namespace xrtransport {
 
 // Module function signatures
-typedef bool (*PFN_module_on_init)(
-    xrtp_Transport transport,
-    xrtransport::FunctionLoader* function_loader,
-    std::uint32_t num_extensions,
-    const XrExtensionProperties* extensions);
-typedef void (*PFN_module_get_required_extensions)(
-    std::uint32_t* num_extensions_out,
-    const char** extensions_out);
-typedef void (*PFN_module_on_instance)(
-    xrtp_Transport transport,
-    xrtransport::FunctionLoader* function_loader,
-    XrInstance instance);
-typedef void (*PFN_module_on_instance_destroy)();
-typedef void (*PFN_module_on_shutdown)();
+typedef decltype(&xrtp_get_server_module) PFN_get_server_module;
 
-class Module {
+class LoadedModule {
 private:
     MODULE_HANDLE handle;
-    PFN_module_on_init pfn_on_init;
-    PFN_module_get_required_extensions pfn_get_required_extensions;
-    PFN_module_on_instance pfn_on_instance;
-    PFN_module_on_instance_destroy pfn_on_instance_destroy;
-    PFN_module_on_shutdown pfn_on_shutdown;
+    std::unique_ptr<ServerModule> module;
 
 public:
-    explicit Module(std::string module_path) {
+    // constructor for dynamically linked modules
+    explicit LoadedModule(
+        std::string module_path,
+        xrtp_Transport transport,
+        FunctionLoader* function_loader,
+        std::uint32_t num_extensions,
+        const XrExtensionProperties* extensions
+    ) {
         handle = MODULE_LOAD(module_path.c_str());
-        pfn_on_init = reinterpret_cast<PFN_module_on_init>(MODULE_SYM(handle, "xrtp_on_init"));
-        pfn_get_required_extensions = reinterpret_cast<PFN_module_get_required_extensions>(MODULE_SYM(handle, "xrtp_get_required_extensions"));
-        pfn_on_instance = reinterpret_cast<PFN_module_on_instance>(MODULE_SYM(handle, "xrtp_on_instance"));
-        pfn_on_instance_destroy = reinterpret_cast<PFN_module_on_instance_destroy>(MODULE_SYM(handle, "xrtp_on_instance_destroy"));
-        pfn_on_shutdown = reinterpret_cast<PFN_module_on_shutdown>(MODULE_SYM(handle, "xrtp_on_shutdown"));
+        auto pfn_get_server_module = reinterpret_cast<PFN_get_server_module>(MODULE_SYM(handle, "xrtp_get_server_module"));
+        auto p_module = pfn_get_server_module(transport, function_loader, num_extensions, extensions);
+        module = std::unique_ptr<ServerModule>(p_module);
     }
 
-    ~Module() {
+    // constructor for statically linked modules
+    explicit LoadedModule(std::unique_ptr<ServerModule> module) : handle(MODULE_NULL), module(std::move(module)) {}
+
+    ~LoadedModule() {
         // handle may be null if module was moved
         if (handle) {
-            on_shutdown();
             MODULE_UNLOAD(handle);
         }
     }
 
-    Module(const Module&) = delete;
-    Module& operator=(const Module&) = delete;
+    LoadedModule(const LoadedModule&) = delete;
+    LoadedModule& operator=(const LoadedModule&) = delete;
 
-    Module(Module&& other) noexcept {
+    LoadedModule(LoadedModule&& other) noexcept {
         handle = other.handle;
-        pfn_on_init = other.pfn_on_init;
-        pfn_get_required_extensions = other.pfn_get_required_extensions;
-        pfn_on_instance = other.pfn_on_instance;
-        pfn_on_instance_destroy = other.pfn_on_instance_destroy;
-        pfn_on_shutdown = other.pfn_on_shutdown;
-        other.handle = nullptr;
-        other.pfn_on_init = nullptr;
-        other.pfn_get_required_extensions = nullptr;
-        other.pfn_on_instance = nullptr;
-        other.pfn_on_instance_destroy = nullptr;
-        other.pfn_on_shutdown = nullptr;
+        module = std::move(other.module);
+        other.handle = MODULE_NULL;
+        other.module = nullptr;
     }
 
-    Module& operator=(Module&& other) noexcept {
+    LoadedModule& operator=(LoadedModule&& other) noexcept {
+        if (&other == this) return *this;
+
         if (handle) {
             MODULE_UNLOAD(handle);
         }
-
         handle = other.handle;
-        pfn_on_init = other.pfn_on_init;
-        pfn_get_required_extensions = other.pfn_get_required_extensions;
-        pfn_on_instance = other.pfn_on_instance;
-        pfn_on_instance_destroy = other.pfn_on_instance_destroy;
-        pfn_on_shutdown = other.pfn_on_shutdown;
-        other.handle = nullptr;
-        other.pfn_on_init = nullptr;
-        other.pfn_get_required_extensions = nullptr;
-        other.pfn_on_instance = nullptr;
-        other.pfn_on_instance_destroy = nullptr;
-        other.pfn_on_shutdown = nullptr;
+
+        module = std::move(other.module);
 
         return *this;
     }
 
-    inline bool on_init(
-        xrtp_Transport transport,
-        xrtransport::FunctionLoader* function_loader,
-        std::uint32_t num_extensions,
-        const XrExtensionProperties* extensions)
-    {
-        return pfn_on_init(transport, function_loader, num_extensions, extensions);
-    }
-
-    inline void get_required_extensions(
+    void get_required_extensions(
         std::uint32_t* num_extensions_out,
         const char** extensions_out)
     {
-        return pfn_get_required_extensions(num_extensions_out, extensions_out);
+        return module->get_required_extensions(num_extensions_out, extensions_out);
     }
 
-    inline void on_instance(
-        xrtp_Transport transport,
-        xrtransport::FunctionLoader* function_loader,
-        XrInstance instance)
+    void on_instance(XrInstance instance)
     {
-        return pfn_on_instance(transport, function_loader, instance);
+        return module->on_instance(instance);
     }
 
-    inline void on_instance_destroy() {
-        return pfn_on_instance_destroy();
+    void on_instance_destroy() {
+        return module->on_instance_destroy();
     }
 
-    inline void on_shutdown()
-    {
-        return pfn_on_shutdown();
+    bool is_enabled() const {
+        return module.get() != nullptr;
     }
 };
 

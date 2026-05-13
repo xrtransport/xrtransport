@@ -3,6 +3,7 @@
 #include "server.h"
 
 #include "module.h"
+#include "module_loader.h"
 
 #include "xrtransport/transport/transport.h"
 #include "xrtransport/server/function_loader.h"
@@ -21,7 +22,7 @@ using std::uint64_t;
 
 namespace xrtransport {
 
-Server::Server(std::unique_ptr<SyncDuplexStream> stream, asio::io_context& stream_io_context, std::vector<std::string> module_paths) :
+Server::Server(std::unique_ptr<SyncDuplexStream> stream) :
     transport(std::move(stream)),
     function_loader(xrGetInstanceProcAddr),
     function_dispatch(
@@ -30,11 +31,9 @@ Server::Server(std::unique_ptr<SyncDuplexStream> stream, asio::io_context& strea
         [this](MessageLockIn msg_in){create_instance_handler(std::move(msg_in));},
         [this](MessageLockIn msg_in){destroy_instance_handler(std::move(msg_in));}
     ),
-    transport_io_context(stream_io_context)
+    modules(ServerModuleLoader::load_modules(transport.get_handle(), &function_loader))
 {
-    for (auto& module_path : module_paths) {
-        modules.push_back(Module(module_path));
-    }
+
 }
 
 // static
@@ -164,25 +163,6 @@ void Server::run() {
         }
     });
 
-    // gather supported extensions so modules can decide whether to enable
-    function_loader.ensure_function_loaded("xrEnumerateInstanceExtensionProperties", function_loader.EnumerateInstanceExtensionProperties);
-    uint32_t num_extensions{};
-    function_loader.EnumerateInstanceExtensionProperties(nullptr, 0, &num_extensions, nullptr);
-    std::vector<XrExtensionProperties> extensions(num_extensions, {XR_TYPE_EXTENSION_PROPERTIES});
-    function_loader.EnumerateInstanceExtensionProperties(nullptr, num_extensions, &num_extensions, extensions.data());
-
-    // initialize all modules (which may add handlers)
-    std::vector<Module> enabled_modules;
-    for (auto& module : modules) {
-        if (module.on_init(transport.get_handle(), &function_loader, num_extensions, extensions.data())) {
-            // move module into new enabled vector
-            enabled_modules.emplace_back(std::move(module));
-        }
-    }
-
-    // update set of enabled extensions
-    modules = std::move(enabled_modules);
-
     // let transport run until it closes
     transport.start();
     transport.join();
@@ -246,7 +226,7 @@ void Server::create_instance_handler(MessageLockIn msg_in) {
 
         // Notify modules that XrInstance was created
         for (auto& module : modules) {
-            module.on_instance(transport.get_handle(), &function_loader, *instance);
+            module.on_instance(*instance);
         }
     }
 

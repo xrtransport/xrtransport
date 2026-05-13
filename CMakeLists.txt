@@ -17,6 +17,13 @@ set(XRTRANSPORT_SERVER_INSTALL_PATH server CACHE STRING
     "Folder within the install prefix to put server libraries"
 )
 
+option(XRTRANSPORT_DYNAMIC_MODULES "Use dynamic linking for modules" OFF)
+
+if (XRTRANSPORT_DYNAMIC_MODULES)
+    # global compile definition so that sources can build for dynamic vs static modules
+    add_compile_definitions(XRTRANSPORT_DYNAMIC_MODULES)
+endif()
+
 if (XRTRANSPORT_BUILD_SERVER)
     # Server needs OpenXR loader to be built
     add_subdirectory(external/OpenXR-SDK EXCLUDE_FROM_ALL)

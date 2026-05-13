@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
+#include "client_handle_exchange_factory.h"
 #include "xrtransport/client/module_interface.h"
+#include "xrtransport/client/module_signature.h"
 #include "xrtransport/handle_exchange.h"
 #include "messages.h"
 
@@ -22,58 +24,75 @@ using namespace xrtransport;
 
 namespace {
 
-void instance_callback(XrInstance instance, PFN_xrGetInstanceProcAddr pfn_xrGetInstanceProcAddr);
-
-ModuleInfo module_info = {
-    .num_extensions = 0,
-    .extensions = nullptr,
-    .num_functions = 0,
-    .functions = nullptr,
-    .instance_callback = instance_callback
-};
-
-std::unique_ptr<Transport> transport;
+// stored globally, set by the single HandleExchangeClientModule instance
 int socket_fd = -1;
 
-void instance_callback(XrInstance instance, PFN_xrGetInstanceProcAddr pfn_xrGetInstanceProcAddr) {
-    auto msg_out = transport->start_message(XRTP_MSG_HANDLE_EXCHANGE_LINUX_GET_PATH);
-    msg_out.flush();
+class HandleExchangeClientModule : public ClientModule {
+private:
+    Transport transport;
+public:
+    explicit HandleExchangeClientModule(xrtp_Transport transport_handle)
+    : transport(transport_handle) {}
 
-    auto msg_in = transport->await_message(XRTP_MSG_HANDLE_EXCHANGE_LINUX_RETURN_PATH);
-    DeserializeContext d_ctx(msg_in.buffer);
-    const char* socket_path{};
-    deserialize_ptr(&socket_path, d_ctx);
-
-    socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (socket_fd < 0) {
-        spdlog::error("Failed to create handle exchange socket: {}", errno);
-        return;
+    const ModuleInfo* get_module_info() override {
+        static ModuleInfo module_info = {
+            .num_extensions = 0,
+            .extensions = nullptr,
+            .num_functions = 0,
+            .functions = nullptr,
+        };
+        return &module_info;
     }
 
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
-    cleanup_ptr(socket_path, count_null_terminated(socket_path));
+    void on_instance(XrInstance instance, PFN_xrGetInstanceProcAddr pfn_xrGetInstanceProcAddr) override {
+        auto msg_out = transport.start_message(XRTP_MSG_HANDLE_EXCHANGE_LINUX_GET_PATH);
+        msg_out.flush();
 
-    // send a message to tell the server to call accept
-    msg_out = transport->start_message(XRTP_MSG_HANDLE_EXCHANGE_LINUX_CLIENT_CONNECTING);
-    msg_out.flush();
+        auto msg_in = transport.await_message(XRTP_MSG_HANDLE_EXCHANGE_LINUX_RETURN_PATH);
+        DeserializeContext d_ctx(msg_in.buffer);
+        const char* socket_path{};
+        deserialize_ptr(&socket_path, d_ctx);
 
-    if (connect(socket_fd, (sockaddr*)&addr, sizeof(addr)) < 0) {
-        spdlog::error("Failed to connect handle exchange socket to path: {}, errno: {}", socket_path, errno);
-        return;
+        socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (socket_fd < 0) {
+            spdlog::error("Failed to create handle exchange socket: {}", errno);
+            return;
+        }
+
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        std::strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path) - 1);
+        cleanup_ptr(socket_path, count_null_terminated(socket_path));
+
+        // send a message to tell the server to call accept
+        msg_out = transport.start_message(XRTP_MSG_HANDLE_EXCHANGE_LINUX_CLIENT_CONNECTING);
+        msg_out.flush();
+
+        if (connect(socket_fd, (sockaddr*)&addr, sizeof(addr)) < 0) {
+            spdlog::error("Failed to connect handle exchange socket to path: {}, errno: {}", socket_path, errno);
+            return;
+        }
     }
+};
+
+} // namespace
+
+namespace xrtransport {
+
+std::unique_ptr<ClientModule> HandleExchangeClientModuleFactory::create(xrtp_Transport transport) {
+    return std::make_unique<HandleExchangeClientModule>(transport);
 }
 
-} // namespace 
+} // namespace xrtransport
 
-void xrtp_get_module_info(
-    xrtp_Transport transport_handle,
-    const ModuleInfo** info_out
-) {
-    transport = std::make_unique<Transport>(transport_handle);
-    *info_out = &module_info;
+#ifdef XRTRANSPORT_DYNAMIC_MODULES
+
+// dynamic module entry point
+ClientModule* xrtp_get_client_module(xrtp_Transport transport) {
+    return HandleExchangeClientModuleFactory::create(transport).release();
 }
+
+#endif
 
 xrtp_Handle xrtp_read_handle() {
     if (socket_fd < 0) {

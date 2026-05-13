@@ -93,7 +93,7 @@
 					},
 					{
 						"name": "XRTP_CLIENT_FD_EXCHANGE_PATH",
-						"value": "/data/local/tmp/xrtransport/fd_exchange.sock"
+						"value": "/tmp/xrtransport/fd_exchange.sock"
 					}
 				],
 				"args": ["unix", "/tmp/xrtransport/transport.sock"],
