@@ -36,6 +36,12 @@ target_include_directories(xrtransport_client PUBLIC
     ${CMAKE_SOURCE_DIR}/external/asio/asio/include
 )
 
+if(XRTRANSPORT_BUILD_FOR_GFXSTREAM)
+    add_subdirectory(gfxstream_asg)
+    target_link_libraries(xrtransport_client PRIVATE gfxstream_asg)
+    target_compile_definitions(xrtransport_client PRIVATE XRTRANSPORT_BUILD_FOR_GFXSTREAM)
+endif()
+
 if(XRTRANSPORT_CREATE_MANIFEST)
     add_openxr_manifest(xrtransport_client_manifest.json $<TARGET_FILE:xrtransport_client>)
     install_openxr_manifest(xrtransport_client_manifest.json $<TARGET_FILE:xrtransport_client> ${XRTRANSPORT_CLIENT_INSTALL_PATH})

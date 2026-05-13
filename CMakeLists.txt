@@ -19,6 +19,13 @@ set(XRTRANSPORT_SERVER_INSTALL_PATH server CACHE STRING
 
 option(XRTRANSPORT_DYNAMIC_MODULES "Use dynamic linking for modules" OFF)
 
+option(XRTRANSPORT_BUILD_FOR_GFXSTREAM "Build client and server for integration with gfxstream in the goldfish emulator" OFF)
+
+# gfxstream and dynamic modules are mutually exclusive
+if(XRTRANSPORT_DYNAMIC_MODULES AND XRTRANSPORT_BUILD_FOR_GFXSTREAM)
+    message(FATAL_ERROR "Dynamic modules are not allowed for the gfxstream build")
+endif()
+
 if (XRTRANSPORT_DYNAMIC_MODULES)
     # global compile definition so that sources can build for dynamic vs static modules
     add_compile_definitions(XRTRANSPORT_DYNAMIC_MODULES)
