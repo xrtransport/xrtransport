@@ -7,6 +7,11 @@
 #include "asio.hpp"
 #include "openxr/openxr.h"
 
+#ifdef XRTRANSPORT_BUILD_FOR_GFXSTREAM
+#include "GoldfishAddressSpaceStream.h"
+using gfxstream::guest::IOStream;
+#endif
+
 #include <stdexcept>
 #include <iostream>
 #include <thread>
@@ -94,6 +99,78 @@ static std::unique_ptr<SyncDuplexStream> create_unix_connection(std::string path
 #endif
 }
 
+static std::unique_ptr<SyncDuplexStream> create_asg_connection() {
+#ifdef XRTRANSPORT_BUILD_FOR_GFXSTREAM
+    class GfxstreamSyncDuplexStream : public SyncDuplexStream {
+    private:
+        std::unique_ptr<IOStream> wrapped;
+    public:
+        explicit GfxstreamSyncDuplexStream(std::unique_ptr<IOStream> wrapped)
+        : wrapped(std::move(wrapped)) {}
+
+        size_t read_some(const asio::mutable_buffer& buffer, asio::error_code& ec) override {
+            ec.clear();
+
+            if (!wrapped) {
+                ec = asio::error::eof;
+                return 0;
+            }
+
+            size_t inout_len = buffer.size();
+            if (!wrapped->read(buffer.data(), &inout_len)) {
+                // gfxstream doesn't tell you which kind of error it was, so just report EOF
+                ec = asio::error::eof;
+            }
+
+            return inout_len;
+        }
+
+        size_t write_some(const asio::const_buffer& buffer, asio::error_code& ec) override {
+            ec.clear();
+
+            if (!wrapped) {
+                ec = asio::error::eof;
+                return 0;
+            }
+
+            // IOStream doesn't support partial writes so just write fully
+            if (wrapped->writeFully(buffer.data(), buffer.size()) == -1) {
+                // gfxstream doesn't tell you which kind of error it was, so just report EOF
+                ec = asio::error::eof;
+
+                // no way to know how much was written on failure
+                return 0;
+            }
+
+            return buffer.size();
+        }
+
+        void close(asio::error_code& ec) override {
+            // IOStream doesn't expose a close method, but based on AddressSpaceStream, it looks
+            // like this is what the destructor is for
+            ec.clear();
+            wrapped.reset();
+        }
+    };
+
+    auto stream = std::unique_ptr<AddressSpaceStream>(createGoldfishAddressSpaceStream(0));
+
+    auto wrapped_stream = std::make_unique<GfxstreamSyncDuplexStream>(std::move(stream));
+
+    // send special opcode that will make xrtransport take over the host RenderThread
+    // TODO: factor out the magic number
+
+    uint32_t xrtransport_packet[2] {
+        5892, // opcode (outside existing ranges for Vulkan, GLES, etc.)
+        8, // length (only this header)
+    };
+
+    asio::write(wrapped_stream, asio::buffer(xrtransport_packet, sizeof(xrtransport_packet)));
+#else
+    throw std::runtime_error("ASG streams not supported");
+#endif
+}
+
 std::unique_ptr<SyncDuplexStream> create_connection() {
     if (runtime) {
         throw std::runtime_error("Connection already exists");
@@ -108,6 +185,9 @@ std::unique_ptr<SyncDuplexStream> create_connection() {
     }
     else if (config->transport_type == TransportType::UNIX) {
         return create_unix_connection(config->unix_path);
+    }
+    else if (config->transport_type == TransportType::ASG) {
+        return create_asg_connection();
     }
     else {
         throw std::runtime_error("Invalid transport type");

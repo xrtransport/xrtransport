@@ -28,7 +28,14 @@ public:
     virtual ~Stream() = default;
 
     // Stream control
-    virtual void close() = 0;
+    virtual void close() {
+        asio::error_code ec;
+        close(ec);
+        if (ec) {
+            throw asio::system_error(ec);
+        }
+    }
+
     virtual void close(asio::error_code& ec) = 0;
 };
 
@@ -38,8 +45,16 @@ public:
     virtual ~SyncReadStream() = default;
 
     // Read some data from the stream
-    virtual std::size_t read_some(const asio::mutable_buffer& buffers) = 0;
-    virtual std::size_t read_some(const asio::mutable_buffer& buffers, asio::error_code& ec) = 0;
+    virtual std::size_t read_some(const asio::mutable_buffer& buffer) {
+        asio::error_code ec;
+        std::size_t result = read_some(buffer, ec);
+        if (ec) {
+            throw asio::system_error(ec);
+        }
+        return result;
+    };
+
+    virtual std::size_t read_some(const asio::mutable_buffer& buffer, asio::error_code& ec) = 0;
 
     // Template convenience methods for ASIO compatibility
     template<typename MutableBufferSequence>
@@ -59,8 +74,16 @@ public:
     virtual ~SyncWriteStream() = default;
 
     // Write some data to the stream
-    virtual std::size_t write_some(const asio::const_buffer& buffers) = 0;
-    virtual std::size_t write_some(const asio::const_buffer& buffers, asio::error_code& ec) = 0;
+    virtual std::size_t write_some(const asio::const_buffer& buffer) {
+        asio::error_code ec;
+        std::size_t result = write_some(buffer, ec);
+        if (ec) {
+            throw asio::system_error(ec);
+        }
+        return result;
+    };
+
+    virtual std::size_t write_some(const asio::const_buffer& buffer, asio::error_code& ec) = 0;
 
     // Template convenience methods for ASIO compatibility
     template<typename ConstBufferSequence>

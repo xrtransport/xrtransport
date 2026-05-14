@@ -46,6 +46,9 @@ Config from_json(std::string json_str) {
             result.transport_type = TransportType::UNIX;
             result.unix_path = data.at("unix_path").get<std::string>();
         }
+        else if (transport_type == "asg") {
+            result.transport_type = TransportType::ASG;
+        }
         else {
             throw ConfigException("invalid transport_type: " + transport_type);
         }
@@ -94,6 +97,9 @@ Config from_android_system_properties() {
     else if (transport_type == "unix") {
         result.transport_type = TransportType::UNIX;
         result.unix_path = get_system_property("xrtransport.unix_path");
+    }
+    else if (transport_type == "asg") {
+        result.transport_type = TransportType::ASG;
     }
     else {
         throw ConfigException("invalid xrtransport.transport_type: " + transport_type);

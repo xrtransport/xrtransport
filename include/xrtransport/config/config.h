@@ -19,7 +19,8 @@ public:
 
 enum class TransportType {
     TCP,
-    UNIX
+    UNIX,
+    ASG
 };
 
 struct Config {
