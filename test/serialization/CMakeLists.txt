@@ -6,8 +6,8 @@ cmake_minimum_required(VERSION 3.15)
 add_executable(serialization_tests fuzzer.cpp)
 
 target_include_directories(serialization_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/OpenXR-SDK/include
-    ${CMAKE_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/OpenXR-SDK/include
+    ${PROJECT_SOURCE_DIR}/include
 )
 
 # Link with Catch2 and xrtransport_serialization

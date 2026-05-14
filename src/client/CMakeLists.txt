@@ -32,8 +32,8 @@ target_link_libraries(xrtransport_client PRIVATE
 # Include directories
 target_include_directories(xrtransport_client PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/external/asio/asio/include
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/external/asio/asio/include
 )
 
 if(XRTRANSPORT_BUILD_FOR_GFXSTREAM)

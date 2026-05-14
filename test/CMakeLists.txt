@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # Add Catch2
-add_subdirectory(${CMAKE_SOURCE_DIR}/external/Catch2 ${CMAKE_BINARY_DIR}/Catch2)
+add_subdirectory(${PROJECT_SOURCE_DIR}/external/Catch2 ${CMAKE_BINARY_DIR}/Catch2)
 
 # Enable CTest integration
 include(CTest)

@@ -9,16 +9,13 @@ option(XRTRANSPORT_BUILD_CLIENT "Build client" ON)
 option(XRTRANSPORT_BUILD_SERVER "Build server" ON)
 option(XRTRANSPORT_BUILD_TESTS "Build tests" ON)
 option(XRTRANSPORT_CREATE_MANIFEST "Create OpenXR Manifest" ON)
-
 set(XRTRANSPORT_CLIENT_INSTALL_PATH client CACHE STRING
     "Folder within the install prefix to put client libraries"
 )
 set(XRTRANSPORT_SERVER_INSTALL_PATH server CACHE STRING
     "Folder within the install prefix to put server libraries"
 )
-
 option(XRTRANSPORT_DYNAMIC_MODULES "Use dynamic linking for modules" OFF)
-
 option(XRTRANSPORT_BUILD_FOR_GFXSTREAM "Build client and server for integration with gfxstream in the goldfish emulator" OFF)
 
 # gfxstream and dynamic modules are mutually exclusive
@@ -49,10 +46,10 @@ endif()
 
 # Add include directories for the project
 include_directories(
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/external/OpenXR-SDK/include
-    ${CMAKE_SOURCE_DIR}/external/spdlog/include
-    ${CMAKE_SOURCE_DIR}/external/asio/asio/include
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/external/OpenXR-SDK/include
+    ${PROJECT_SOURCE_DIR}/external/spdlog/include
+    ${PROJECT_SOURCE_DIR}/external/asio/asio/include
 )
 
 # Build with PIC so that static libraries can be linked into shared libraries

@@ -38,9 +38,9 @@ else()
 endif()
 
 target_include_directories(module_client_vulkan PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/external/OpenXR-SDK/include
-    ${CMAKE_SOURCE_DIR}/external/spdlog/include
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/external/OpenXR-SDK/include
+    ${PROJECT_SOURCE_DIR}/external/spdlog/include
 )
 
 target_include_directories(module_client_vulkan PUBLIC

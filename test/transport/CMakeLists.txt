@@ -11,8 +11,8 @@ add_executable(transport_server
 )
 
 target_include_directories(transport_server PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/asio/asio/include
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/asio/asio/include
 )
 
 target_link_libraries(transport_server PRIVATE
@@ -32,9 +32,9 @@ add_executable(transport_tests
 )
 
 target_include_directories(transport_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/asio/asio/include
+    ${PROJECT_SOURCE_DIR}/asio/asio/include
 )
 
 target_link_libraries(transport_tests PRIVATE
@@ -53,8 +53,8 @@ add_executable(transport_integration_tests
 )
 
 target_include_directories(transport_integration_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/asio/asio/include
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/asio/asio/include
 )
 
 target_link_libraries(transport_integration_tests PRIVATE

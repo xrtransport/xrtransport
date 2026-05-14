@@ -20,6 +20,12 @@ endif()
 option(XRTRANSPORT_BUILD_MODULE_HANDLE_EXCHANGE "Build Handle Exchange Module" ON)
 option(XRTRANSPORT_BUILD_MODULE_VULKAN "Build Vulkan Module" ON)
 
+if(XRTRANSPORT_BUILD_FOR_GFXSTREAM)
+    # handle exchange is not needed for gfxstream build because it uses a custom mechanism to share
+    # already-imported handles with the client
+    set(XRTRANSPORT_BUILD_MODULE_HANDLE_EXCHANGE OFF)
+endif()
+
 if(XRTRANSPORT_BUILD_MODULE_HANDLE_EXCHANGE)
     if(WIN32)
         set(HANDLE_EXCHANGE_DIR "handle_exchange_win32")

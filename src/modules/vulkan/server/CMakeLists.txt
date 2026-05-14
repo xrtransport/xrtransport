@@ -26,9 +26,9 @@ else()
 endif()
 
 target_include_directories(module_server_vulkan PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/external/OpenXR-SDK/include
-    ${CMAKE_SOURCE_DIR}/external/spdlog/include
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/external/OpenXR-SDK/include
+    ${PROJECT_SOURCE_DIR}/external/spdlog/include
 )
 
 target_include_directories(module_server_vulkan PUBLIC
@@ -37,9 +37,17 @@ target_include_directories(module_server_vulkan PUBLIC
 
 target_link_libraries(module_server_vulkan PRIVATE
     module_common_vulkan
-    module_server_handle_exchange
     xrtransport_transport
     xrtransport_serialization
     Vulkan::Vulkan
 )
 
+if(XRTRANSPORT_BUILD_FOR_GFXSTREAM)
+    target_compile_definitions(module_server_vulkan PRIVATE
+        XRTRANSPORT_BUILD_FOR_GFXSTREAM
+    )
+else()
+    target_link_libraries(module_server_vulkan PRIVATE
+        module_server_handle_exchange
+    )
+endif()

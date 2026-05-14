@@ -28,9 +28,9 @@ target_link_libraries(xrtransport_server PUBLIC
 # Include directories
 target_include_directories(xrtransport_server PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/external/asio/asio/include
-    ${CMAKE_SOURCE_DIR}/external/OpenXR-SDK/include
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/external/asio/asio/include
+    ${PROJECT_SOURCE_DIR}/external/OpenXR-SDK/include
 )
 
 # Server executable
