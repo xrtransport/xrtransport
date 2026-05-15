@@ -20,6 +20,8 @@
 #define XRTP_MSG_VULKAN2_DESTROY_SESSION_RETURN 109
 #define XRTP_MSG_VULKAN2_RELEASE_SWAPCHAIN_IMAGE 110
 #define XRTP_MSG_VULKAN2_RELEASE_SWAPCHAIN_IMAGE_RETURN 111
+#define XRTP_MSG_VULKAN2_GET_SWAPCHAIN_IMAGE_HANDLES 112
+#define XRTP_MSG_VULKAN2_RETURN_SWAPCHAIN_IMAGE_HANDLES 113
 
 // this needs to be exactly in common between client and server for export/import
 static inline VkImageCreateInfo create_vk_image_create_info(const XrSwapchainCreateInfo& create_info) {

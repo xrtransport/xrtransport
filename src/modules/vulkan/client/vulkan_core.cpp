@@ -5,6 +5,7 @@
 #include "image_handles.h"
 #include "vulkan_loader.h"
 #include "session_state.h"
+#include "image_import.h"
 
 #include "xrtransport/handle_exchange.h"
 #include "xrtransport/transport/transport.h"
@@ -66,34 +67,6 @@ void set_xr_instance(XrInstance instance) {
 
 void on_graphics_requirements_called() {
     graphics_requirements_called = true;
-}
-
-VkSemaphore import_semaphore(VkDevice device, xrtp_Handle handle) {
-    VkResult result{};
-
-    VkSemaphoreCreateInfo create_info{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-
-    VkSemaphore semaphore{};
-    result = vk->CreateSemaphore(device, &create_info, nullptr, &semaphore);
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create semaphore: " + std::to_string(result));
-    }
-
-#ifdef _WIN32
-    #error TODO
-#else
-    VkImportSemaphoreFdInfoKHR import_info{VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR};
-    import_info.semaphore = semaphore;
-    import_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
-    import_info.fd = static_cast<int>(handle);
-
-    result = vk->ImportSemaphoreFdKHR(device, &import_info);
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to import semaphore: " + std::to_string(result));
-    }
-#endif
-
-    return semaphore;
 }
 
 VkCommandBuffer record_acquire_command_buffer(
@@ -232,67 +205,13 @@ VkCommandBuffer record_release_command_buffer(
 
 SwapchainImage create_image(
     const SessionState& session_state,
-    const XrSwapchainCreateInfo& xr_create_info,
-    const ImageHandles& image_handles,
-    uint64_t memory_size,
-    uint32_t memory_type_index,
+    const ImportedImage& imported_image,
+    VkImageAspectFlags aspect,
+    uint32_t num_levels,
+    uint32_t num_layers,
     ImageType image_type
 ) {
     VkResult vk_result{};
-
-    VkExternalMemoryImageCreateInfo external_create_info{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO};
-#ifdef _WIN32
-    external_create_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
-#else
-    external_create_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
-#endif
-
-    auto vk_create_info = create_vk_image_create_info(xr_create_info);
-    vk_create_info.pNext = &external_create_info;
-    vk_create_info.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-
-    VkImageAspectFlags aspect = get_aspect_from_format(vk_create_info.format);
-    uint32_t num_levels = vk_create_info.mipLevels;
-    uint32_t num_layers = vk_create_info.arrayLayers;
-
-    VkImage image{};
-    vk_result = vk->CreateImage(session_state.graphics_binding.device, &vk_create_info, nullptr, &image);
-    if (vk_result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create VkImage: " + std::to_string(vk_result));
-    }
-
-#ifdef _WIN32
-    #error TODO
-#else
-    VkImportMemoryFdInfoKHR import_info{VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR};
-    import_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
-    import_info.fd = image_handles.memory_handle;
-#endif
-
-    VkMemoryAllocateInfo alloc_info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    alloc_info.pNext = &import_info;
-    alloc_info.allocationSize = memory_size;
-    alloc_info.memoryTypeIndex = memory_type_index;
-
-    VkDeviceMemory image_memory{};
-    vk_result = vk->AllocateMemory(session_state.graphics_binding.device, &alloc_info, nullptr, &image_memory);
-    if (vk_result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to import memory from FD: " + std::to_string(vk_result));
-    }
-
-    vk_result = vk->BindImageMemory(session_state.graphics_binding.device, image, image_memory, 0);
-    if (vk_result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to bind memory to image: " + std::to_string(vk_result));
-    }
-
-#ifdef _WIN32
-    #error Close handle if needed
-#else
-    // No need to close the FD, the driver closes it upon successful import.
-#endif
-
-    VkSemaphore rendering_done = import_semaphore(session_state.graphics_binding.device, image_handles.rendering_done_handle);
-    VkSemaphore copying_done = import_semaphore(session_state.graphics_binding.device, image_handles.copying_done_handle);
 
     VkFenceCreateInfo fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     // signaled so that the first wait returns immediately
@@ -306,7 +225,7 @@ SwapchainImage create_image(
     VkCommandBuffer acquire_command_buffer = record_acquire_command_buffer(
         session_state.graphics_binding.device,
         session_state.command_pool,
-        image,
+        imported_image.image,
         image_type,
         aspect,
         num_levels,
@@ -315,7 +234,7 @@ SwapchainImage create_image(
     VkCommandBuffer release_command_buffer = record_release_command_buffer(
         session_state.graphics_binding.device,
         session_state.command_pool,
-        image,
+        imported_image.image,
         image_type,
         session_state.graphics_binding.queueFamilyIndex,
         aspect,
@@ -327,11 +246,11 @@ SwapchainImage create_image(
         .image = XrSwapchainImageVulkan2KHR{
             .type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR,
             .next = nullptr,
-            .image = image
+            .image = imported_image.image
         },
-        .memory = image_memory,
-        .rendering_done = rendering_done,
-        .copying_done = copying_done,
+        .memory = imported_image.memory,
+        .rendering_done = imported_image.rendering_done,
+        .copying_done = imported_image.copying_done,
         .copying_done_fence = copying_done_fence,
         .acquire_command_buffer = acquire_command_buffer,
         .release_command_buffer = release_command_buffer,
@@ -416,14 +335,30 @@ try {
     std::vector<SwapchainImage> images;
     images.reserve(num_images);
 
+    VkImageCreateInfo vk_image_create_info = create_vk_image_create_info(*createInfo);
+
+    VkImageAspectFlags aspect = get_aspect_from_format(vk_image_create_info.format);
+    uint32_t num_levels = vk_image_create_info.mipLevels;
+    uint32_t num_layers = vk_image_create_info.arrayLayers;
+
+    std::vector<ImportedImage> imported_images = import_images(
+        *transport,
+        *vk,
+        session_state.graphics_binding.device,
+        handle,
+        num_images,
+        vk_image_create_info,
+        memory_size,
+        memory_type_index
+    );
+
     for (uint32_t i = 0; i < num_images; i++) {
-        ImageHandles image_handles = read_image_handles();
         images.emplace_back(create_image(
             session_state,
-            *createInfo,
-            image_handles,
-            memory_size,
-            memory_type_index,
+            imported_images[i],
+            aspect,
+            num_levels,
+            num_layers,
             image_type
         ));
     }

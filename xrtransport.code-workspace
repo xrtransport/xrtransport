@@ -6,11 +6,11 @@
 		},
 		{
 			"name": "monado",
-			"path": "../monado"
+			"path": "../../../monado"
 		},
 		{
 			"name": "OpenXR-SDK-Source",
-			"path": "../OpenXR-SDK-Source"
+			"path": "../../../OpenXR-SDK-Source"
 		}
 	],
 	"settings": {},

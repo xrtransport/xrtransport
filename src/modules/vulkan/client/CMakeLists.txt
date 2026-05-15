@@ -10,6 +10,7 @@ if(XRTRANSPORT_DYNAMIC_MODULES)
         vulkan_client_module.cpp
         vulkan_core.cpp
         session_state.cpp
+        image_import.cpp
     )
 
     install(TARGETS module_client_vulkan
@@ -33,6 +34,7 @@ else()
         vulkan_client_module.cpp
         vulkan_core.cpp
         session_state.cpp
+        image_import.cpp
     )
 
 endif()
@@ -49,8 +51,13 @@ target_include_directories(module_client_vulkan PUBLIC
 
 target_link_libraries(module_client_vulkan PRIVATE
     module_common_vulkan
-    module_client_handle_exchange
     xrtransport_transport
     xrtransport_serialization
     Vulkan::Vulkan
 )
+
+if(XRTRANSPORT_BUILD_FOR_GFXSTREAM)
+    target_compile_definitions(module_client_vulkan PRIVATE XRTRANSPORT_BUILD_FOR_GFXSTREAM)
+else()
+    target_link_libraries(module_client_vulkan PRIVATE module_client_handle_exchange)
+endif()
