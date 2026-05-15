@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 
 #include "vulkan_common.h"
+#include "vulkan_loader.h"
+#include "vulkan_init.h"
 #include "image_handles.h"
 #include "image_type.h"
 #include "vulkan_server_module_factory.h"
@@ -95,6 +97,8 @@ class VulkanServerModule : public ServerModule {
 private:
     Transport transport;
     FunctionLoader& function_loader;
+    std::unique_ptr<VulkanLoader> vk =
+        std::make_unique<VulkanLoader>(VulkanLoader::init_global(get_vulkan_init_function()));
 
     std::unordered_map<XrSwapchain, SwapchainState> swapchain_states;
     std::unordered_map<XrSession, SessionState> session_states;
@@ -118,9 +122,6 @@ private:
     PFN_xrCreateVulkanInstanceKHR pfn_xrCreateVulkanInstanceKHR = nullptr;
     PFN_xrGetVulkanGraphicsDevice2KHR pfn_xrGetVulkanGraphicsDevice2KHR = nullptr;
     PFN_xrCreateVulkanDeviceKHR pfn_xrCreateVulkanDeviceKHR = nullptr;
-
-    PFN_vkGetMemoryFdKHR pfn_vkGetMemoryFdKHR = nullptr;
-    PFN_vkGetSemaphoreFdKHR pfn_vkGetSemaphoreFdKHR = nullptr;
 
     //// Session and Swapchain storage helpers ////
 
@@ -192,9 +193,9 @@ private:
 
     void select_queue_family() {
         uint32_t queue_family_count{};
-        vkGetPhysicalDeviceQueueFamilyProperties(saved_vk_physical_device, &queue_family_count, nullptr);
+        vk->GetPhysicalDeviceQueueFamilyProperties(saved_vk_physical_device, &queue_family_count, nullptr);
         std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
-        vkGetPhysicalDeviceQueueFamilyProperties(saved_vk_physical_device, &queue_family_count, queue_families.data());
+        vk->GetPhysicalDeviceQueueFamilyProperties(saved_vk_physical_device, &queue_family_count, queue_families.data());
 
         bool queue_family_found = false;
         for (size_t i = 0; i < queue_families.size(); i++) {
@@ -254,7 +255,7 @@ private:
 
         XrVulkanInstanceCreateInfoKHR xr_create_info{XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR};
         xr_create_info.systemId = saved_xr_system_id;
-        xr_create_info.pfnGetInstanceProcAddr = vkGetInstanceProcAddr;
+        xr_create_info.pfnGetInstanceProcAddr = vk->GetInstanceProcAddr;
         xr_create_info.vulkanCreateInfo = &vk_create_info;
 
         xr_result = pfn_xrCreateVulkanInstanceKHR(saved_xr_instance, &xr_create_info, &saved_vk_instance, &vk_result);
@@ -264,6 +265,9 @@ private:
         if (!XR_SUCCEEDED(xr_result)) {
             throw std::runtime_error("XR error on Vulkan instance creation: " + std::to_string(xr_result));
         }
+
+        // fetch instance-level Vulkan functions
+        vk = std::make_unique<VulkanLoader>(vk->init_instance(saved_vk_instance));
 
         XrVulkanGraphicsDeviceGetInfoKHR xr_device_get_info{XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR};
         xr_device_get_info.systemId = saved_xr_system_id;
@@ -280,7 +284,7 @@ private:
         VkPhysicalDeviceProperties2 vk_device_props{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
         vk_device_props.pNext = &vk_device_id_props;
 
-        vkGetPhysicalDeviceProperties2(saved_vk_physical_device, &vk_device_props);
+        vk->GetPhysicalDeviceProperties2(saved_vk_physical_device, &vk_device_props);
 
         std::memcpy(physical_device_uuid, vk_device_id_props.deviceUUID, VK_UUID_SIZE);
 
@@ -313,7 +317,7 @@ private:
 
         XrVulkanDeviceCreateInfoKHR xr_device_create_info{XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR};
         xr_device_create_info.systemId = saved_xr_system_id;
-        xr_device_create_info.pfnGetInstanceProcAddr = vkGetInstanceProcAddr;
+        xr_device_create_info.pfnGetInstanceProcAddr = vk->GetInstanceProcAddr;
         xr_device_create_info.vulkanPhysicalDevice = saved_vk_physical_device;
         xr_device_create_info.vulkanCreateInfo = &vk_device_create_info;
 
@@ -325,10 +329,10 @@ private:
             throw std::runtime_error("XR error on Vulkan device creation: " + std::to_string(xr_result));
         }
 
-        pfn_vkGetMemoryFdKHR = (PFN_vkGetMemoryFdKHR)vkGetDeviceProcAddr(saved_vk_device, "vkGetMemoryFdKHR");
-        pfn_vkGetSemaphoreFdKHR = (PFN_vkGetSemaphoreFdKHR)vkGetDeviceProcAddr(saved_vk_device, "vkGetSemaphoreFdKHR");
+        // initialize device-level Vulkan functions
+        vk = std::make_unique<VulkanLoader>(vk->init_device(saved_vk_device));
 
-        vkGetDeviceQueue(saved_vk_device, queue_family_index, queue_index, &saved_vk_queue);
+        vk->GetDeviceQueue(saved_vk_device, queue_family_index, queue_index, &saved_vk_queue);
 
         // Create command pool
         VkCommandPoolCreateInfo pool_create_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -337,7 +341,7 @@ private:
             VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         pool_create_info.queueFamilyIndex = queue_family_index;
 
-        vk_result = vkCreateCommandPool(saved_vk_device, &pool_create_info, nullptr, &saved_vk_command_pool);
+        vk_result = vk->CreateCommandPool(saved_vk_device, &pool_create_info, nullptr, &saved_vk_command_pool);
         if (vk_result != VK_SUCCESS) {
             throw std::runtime_error("Failed to create command pool: " + std::to_string(vk_result));
         }
@@ -377,7 +381,7 @@ private:
         create_info.pNext = &export_info;
 
         VkSemaphore semaphore{};
-        result = vkCreateSemaphore(saved_vk_device, &create_info, nullptr, &semaphore);
+        result = vk->CreateSemaphore(saved_vk_device, &create_info, nullptr, &semaphore);
         if (result != VK_SUCCESS) {
             throw std::runtime_error("Unable to create exportable semaphore: " + std::to_string(result));
         }
@@ -392,7 +396,7 @@ private:
         get_fd_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
 
         int fd{};
-        result = pfn_vkGetSemaphoreFdKHR(saved_vk_device, &get_fd_info, &fd);
+        result = vk->GetSemaphoreFdKHR(saved_vk_device, &get_fd_info, &fd);
         if (result != VK_SUCCESS) {
             throw std::runtime_error("Unable to export FD for semaphore: " + std::to_string(result));
         }
@@ -410,7 +414,7 @@ private:
         cmdbuf_info.commandBufferCount = 1;
 
         VkCommandBuffer command_buffer{};
-        VkResult result = vkAllocateCommandBuffers(saved_vk_device, &cmdbuf_info, &command_buffer);
+        VkResult result = vk->AllocateCommandBuffers(saved_vk_device, &cmdbuf_info, &command_buffer);
         if (result != VK_SUCCESS) {
             throw std::runtime_error("Unable to allocate command buffer: " + std::to_string(result));
         }
@@ -423,7 +427,7 @@ private:
         fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
         VkFence fence{};
-        VkResult result = vkCreateFence(saved_vk_device, &fence_info, nullptr, &fence);
+        VkResult result = vk->CreateFence(saved_vk_device, &fence_info, nullptr, &fence);
         if (result != VK_SUCCESS) {
             throw std::runtime_error("Unable to create fence: " + std::to_string(result));
         }
@@ -454,13 +458,13 @@ private:
         uint32_t num_layers = image_create_info.arrayLayers;
 
         VkImage image{};
-        vk_result = vkCreateImage(saved_vk_device, &image_create_info, nullptr, &image);
+        vk_result = vk->CreateImage(saved_vk_device, &image_create_info, nullptr, &image);
         if (vk_result != VK_SUCCESS) {
             throw std::runtime_error("Unable to create VkImage: " + std::to_string(vk_result));
         }
 
         VkMemoryRequirements memory_requirements{};
-        vkGetImageMemoryRequirements(saved_vk_device, image, &memory_requirements);
+        vk->GetImageMemoryRequirements(saved_vk_device, image, &memory_requirements);
 
         int32_t memory_type = find_memory_type(memory_properties, memory_requirements.memoryTypeBits, required_flags);
         if (memory_type == -1) {
@@ -486,12 +490,12 @@ private:
         alloc_info.memoryTypeIndex = memory_type_index;
 
         VkDeviceMemory memory{};
-        vk_result = vkAllocateMemory(saved_vk_device, &alloc_info, nullptr, &memory);
+        vk_result = vk->AllocateMemory(saved_vk_device, &alloc_info, nullptr, &memory);
         if (vk_result != VK_SUCCESS) {
             throw std::runtime_error("Failed to allocate swapchain memory: " + std::to_string(vk_result));
         }
 
-        vk_result = vkBindImageMemory(saved_vk_device, image, memory, 0);
+        vk_result = vk->BindImageMemory(saved_vk_device, image, memory, 0);
         if (vk_result != VK_SUCCESS) {
             throw std::runtime_error("Failed to bind memory to image: " + std::to_string(vk_result));
         }
@@ -506,7 +510,7 @@ private:
         get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
 
         int fd{};
-        vk_result = pfn_vkGetMemoryFdKHR(saved_vk_device, &get_fd_info, &fd);
+        vk_result = vk->GetMemoryFdKHR(saved_vk_device, &get_fd_info, &fd);
         if (vk_result != VK_SUCCESS) {
             throw std::runtime_error("Failed to get memory fd: " + std::to_string(vk_result));
         }
@@ -575,7 +579,7 @@ private:
         handles_out.reserve(num_images);
 
         VkPhysicalDeviceMemoryProperties memory_properties{};
-        vkGetPhysicalDeviceMemoryProperties(saved_vk_physical_device, &memory_properties);
+        vk->GetPhysicalDeviceMemoryProperties(saved_vk_physical_device, &memory_properties);
 
         VkMemoryPropertyFlags required_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
         if (create_info.createFlags & XR_SWAPCHAIN_CREATE_PROTECTED_CONTENT_BIT) {
@@ -705,19 +709,19 @@ private:
         SwapchainState& swapchain_state = get_swapchain_state(swapchain_handle).value();
         SessionState& session_state = get_session_state(swapchain_state.parent_handle).value();
 
-        vkQueueWaitIdle(saved_vk_queue);
+        vk->QueueWaitIdle(saved_vk_queue);
 
         for (auto& image : swapchain_state.shared_images) {
-            vkFreeCommandBuffers(
+            vk->FreeCommandBuffers(
                 saved_vk_device,
                 saved_vk_command_pool,
                 1,
                 &image.command_buffer
             );
-            vkDestroyImage(saved_vk_device, image.image, nullptr);
-            vkFreeMemory(saved_vk_device, image.shared_memory, nullptr);
-            vkDestroySemaphore(saved_vk_device, image.rendering_done, nullptr);
-            vkDestroySemaphore(saved_vk_device, image.copying_done, nullptr);
+            vk->DestroyImage(saved_vk_device, image.image, nullptr);
+            vk->FreeMemory(saved_vk_device, image.shared_memory, nullptr);
+            vk->DestroySemaphore(saved_vk_device, image.rendering_done, nullptr);
+            vk->DestroySemaphore(saved_vk_device, image.copying_done, nullptr);
         }
 
         destroy_swapchain_state(swapchain_handle);
@@ -821,11 +825,11 @@ private:
         // wait on fence to make sure that the command buffer is not still being used
         // synchronization with the client should already guarantee this, but this is just for safety
         // in case of misbehaving clients
-        vk_result = vkWaitForFences(saved_vk_device, 1, &command_buffer_fence, VK_TRUE, UINT64_MAX);
+        vk_result = vk->WaitForFences(saved_vk_device, 1, &command_buffer_fence, VK_TRUE, UINT64_MAX);
         if (vk_result != VK_SUCCESS) {
             throw std::runtime_error("Failed to wait on fence: " + std::to_string(vk_result));
         }
-        vk_result = vkResetFences(saved_vk_device, 1, &command_buffer_fence);
+        vk_result = vk->ResetFences(saved_vk_device, 1, &command_buffer_fence);
         if (vk_result != VK_SUCCESS) {
             throw std::runtime_error("Failed to reset fence: " + std::to_string(vk_result));
         }
@@ -835,7 +839,7 @@ private:
         VkCommandBufferBeginInfo begin_info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        vk_result = vkBeginCommandBuffer(command_buffer, &begin_info);
+        vk_result = vk->BeginCommandBuffer(command_buffer, &begin_info);
         if (vk_result != VK_SUCCESS) {
             throw std::runtime_error("Failed to begin command buffer: " + std::to_string(vk_result));
         }
@@ -874,7 +878,7 @@ private:
         dest_transition_barrier.image = dest_image;
         dest_transition_barrier.subresourceRange = image_subresource_range;
 
-        vkCmdPipelineBarrier(
+        vk->CmdPipelineBarrier(
             command_buffer,
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -893,7 +897,7 @@ private:
         // eye ends up displaying, this would be a good place to look.
         image_copy.extent = {swapchain_state.width, swapchain_state.height, 1};
 
-        vkCmdCopyImage(
+        vk->CmdCopyImage(
             command_buffer,
             src_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             dest_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -909,7 +913,7 @@ private:
         dest_transition_back_barrier.image = dest_image;
         dest_transition_back_barrier.subresourceRange = image_subresource_range;
 
-        vkCmdPipelineBarrier(
+        vk->CmdPipelineBarrier(
             command_buffer,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
@@ -919,7 +923,7 @@ private:
             1, &dest_transition_back_barrier
         );
 
-        vk_result = vkEndCommandBuffer(command_buffer);
+        vk_result = vk->EndCommandBuffer(command_buffer);
         if (vk_result != VK_SUCCESS) {
             throw std::runtime_error("Failed to end command buffer: " + std::to_string(vk_result));
         }
@@ -943,7 +947,7 @@ private:
         submit_info.signalSemaphoreCount = 1;
         submit_info.pSignalSemaphores = &copying_done;
 
-        vk_result = vkQueueSubmit(saved_vk_queue, 1, &submit_info, command_buffer_fence);
+        vk_result = vk->QueueSubmit(saved_vk_queue, 1, &submit_info, command_buffer_fence);
         if (vk_result != VK_SUCCESS) {
             throw std::runtime_error("Failed to submit copy operation to queue: " + std::to_string(vk_result));
         }
@@ -1025,9 +1029,9 @@ public:
         saved_xr_instance = XR_NULL_HANDLE;
         saved_xr_system_id = 0;
 
-        vkDeviceWaitIdle(saved_vk_device);
+        vk->DeviceWaitIdle(saved_vk_device);
 
-        vkDestroyCommandPool(saved_vk_device, saved_vk_command_pool, nullptr);
+        vk->DestroyCommandPool(saved_vk_device, saved_vk_command_pool, nullptr);
 
         // runtime's xrDestroyInstance is responsible for cleaning up the Vulkan instance and device
         // that we created

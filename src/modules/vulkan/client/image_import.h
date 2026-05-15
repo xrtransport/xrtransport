@@ -21,7 +21,7 @@ struct ImportedImage {
 
 std::vector<ImportedImage> import_images(
     xrtransport::Transport& transport,
-    const VulkanLoader& vk,
+    const xrtransport::VulkanLoader& vk,
     VkDevice device,
     XrSwapchain swapchain_handle,
     std::uint32_t num_images,

@@ -24,6 +24,8 @@
 #include <unordered_map>
 #include <tuple>
 
+using namespace xrtransport;
+
 namespace {
 
 std::unordered_map<XrSwapchain, SwapchainState> swapchain_states;

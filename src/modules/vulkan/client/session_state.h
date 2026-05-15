@@ -37,7 +37,7 @@ SwapchainState& store_swapchain_state(
     uint32_t height,
     bool is_static,
     ImageType image_type,
-    VulkanLoader& vk
+    xrtransport::VulkanLoader& vk
 );
 SessionState& store_session_state(
     XrSession handle,
@@ -83,7 +83,7 @@ private:
     // if true, size is 1 and the image can only be acquired once
     bool is_static;
 
-    VulkanLoader& vk;
+    xrtransport::VulkanLoader& vk;
 
     // retrieved from the parent SessionState and stored here for convenience
     VkDevice device;
@@ -104,7 +104,7 @@ public:
         uint32_t height,
         bool is_static,
         ImageType image_type,
-        VulkanLoader& vk
+        xrtransport::VulkanLoader& vk
     );
 
     XrResult acquire(uint32_t& index_out);

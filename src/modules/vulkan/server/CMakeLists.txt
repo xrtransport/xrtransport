@@ -2,11 +2,10 @@
 
 cmake_minimum_required(VERSION 3.15)
 
-find_package(Vulkan REQUIRED)
-
 if (XRTRANSPORT_DYNAMIC_MODULES)
     add_library(module_server_vulkan SHARED
         vulkan_server_module.cpp
+        vulkan_init.cpp
     )
     
     install(TARGETS module_server_vulkan
@@ -22,6 +21,7 @@ if (XRTRANSPORT_DYNAMIC_MODULES)
 else()
     add_library(module_server_vulkan STATIC
         vulkan_server_module.cpp
+        vulkan_init.cpp
     )
 endif()
 
@@ -39,7 +39,6 @@ target_link_libraries(module_server_vulkan PRIVATE
     module_common_vulkan
     xrtransport_transport
     xrtransport_serialization
-    Vulkan::Vulkan
 )
 
 if(XRTRANSPORT_BUILD_FOR_GFXSTREAM)
@@ -47,7 +46,10 @@ if(XRTRANSPORT_BUILD_FOR_GFXSTREAM)
         XRTRANSPORT_BUILD_FOR_GFXSTREAM
     )
 else()
+    find_package(Vulkan REQUIRED)
+
     target_link_libraries(module_server_vulkan PRIVATE
         module_server_handle_exchange
+        Vulkan::Vulkan
     )
 endif()

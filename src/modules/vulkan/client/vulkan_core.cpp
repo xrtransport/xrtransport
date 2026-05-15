@@ -55,7 +55,7 @@ void set_transport(xrtp_Transport handle) {
 
 void initialize_vulkan(PFN_vkGetInstanceProcAddr pfn_vkGetInstanceProcAddr) {
     if (!vk) {
-        vk = std::make_unique<VulkanLoader>(pfn_vkGetInstanceProcAddr);
+        vk = std::make_unique<VulkanLoader>(VulkanLoader::init_global(pfn_vkGetInstanceProcAddr));
     }
 }
 
@@ -593,9 +593,9 @@ try {
 
     // if we're using XR_KHR_vulkan_enable, this is the first time we've seen the instance
     // so load the functions here for both extensions
-    if (!vk->instance) {
-        vk->load_post_instance(graphics_binding.instance);
-    }
+    vk = std::make_unique<VulkanLoader>(
+        vk->init_instance(graphics_binding.instance).init_device(graphics_binding.device)
+    );
 
     auto msg_out = transport->start_message(XRTP_MSG_VULKAN2_CREATE_SESSION);
     SerializeContext s_ctx(msg_out.buffer);
