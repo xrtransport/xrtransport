@@ -1,10 +1,14 @@
 #include "image_import.h"
 
 #include "vulkan_common.h"
-#include "image_handles.h"
 #include "xrtransport/transport/transport.h"
 #include "xrtransport/serialization/serializer.h"
 #include "xrtransport/serialization/deserializer.h"
+
+// only import handle exchange related headers if we're not building for gfxstream
+#ifndef XRTRANSPORT_BUILD_FOR_GFXSTREAM
+#include "image_handles.h"
+#endif
 
 #include <stdexcept>
 

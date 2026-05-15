@@ -2,12 +2,10 @@
 
 #include "vulkan_core.h"
 #include "vulkan_common.h"
-#include "image_handles.h"
 #include "vulkan_loader.h"
 #include "session_state.h"
 #include "image_import.h"
 
-#include "xrtransport/handle_exchange.h"
 #include "xrtransport/transport/transport.h"
 #include "xrtransport/serialization/serializer.h"
 #include "xrtransport/serialization/deserializer.h"
