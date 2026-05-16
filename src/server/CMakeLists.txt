@@ -10,6 +10,7 @@ add_library(xrtransport_server STATIC
     server.cpp
     function_dispatch.cpp
     module_loader.cpp
+    server_c_api.cpp
 )
 
 if(XRTRANSPORT_DYNAMIC_MODULES)
