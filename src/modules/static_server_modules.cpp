@@ -2,7 +2,10 @@
 
 #include "static_server_modules.h"
 
+#ifdef XRTRANSPORT_BUILD_MODULE_HANDLE_EXCHANGE
 #include "server_handle_exchange_factory.h"
+#endif
+
 #include "vulkan_server_module_factory.h"
 
 namespace xrtransport {

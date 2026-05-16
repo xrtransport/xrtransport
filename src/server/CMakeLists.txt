@@ -33,25 +33,28 @@ target_include_directories(xrtransport_server PUBLIC
     ${PROJECT_SOURCE_DIR}/external/OpenXR-SDK/include
 )
 
-# Server executable
-add_executable(xrtransport_server_main
-    main.cpp
-)
+if(XRTRANSPORT_BUILD_SERVER_EXECUTABLE)
+    # Server executable
+    add_executable(xrtransport_server_main
+        main.cpp
+    )
 
-# Dependencies (include directories inherited)
-target_link_libraries(xrtransport_server_main
-    xrtransport_server
-)
+    # Dependencies (include directories inherited)
+    target_link_libraries(xrtransport_server_main
+        xrtransport_server
+    )
 
-# setup install directory
-install(TARGETS xrtransport_server_main RUNTIME DESTINATION ${XRTRANSPORT_SERVER_INSTALL_PATH})
+    # setup install directory
+    install(TARGETS xrtransport_server_main RUNTIME DESTINATION ${XRTRANSPORT_SERVER_INSTALL_PATH})
+
+    if(UNIX)
+        set_target_properties(xrtransport_server_main PROPERTIES
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
+endif()
+
 install(TARGETS xrtransport_transport
     LIBRARY DESTINATION ${XRTRANSPORT_SERVER_INSTALL_PATH}
     RUNTIME DESTINATION ${XRTRANSPORT_SERVER_INSTALL_PATH}
 )
-
-if(UNIX)
-    set_target_properties(xrtransport_server_main PROPERTIES
-        INSTALL_RPATH "$ORIGIN"
-    )
-endif()

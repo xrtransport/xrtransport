@@ -13,7 +13,13 @@
 #include "xrtransport/transport/transport.h"
 #include "xrtransport/serialization/serializer.h"
 #include "xrtransport/serialization/deserializer.h"
+
+#ifdef XRTRANSPORT_BUILD_FOR_GFXSTREAM
+#include "vulkan_boxed_handles.h"
+using namespace gfxstream::host::vk;
+#else
 #include "xrtransport/handle_exchange.h"
+#endif
 
 #include <vulkan/vulkan.h>
 #define XR_USE_GRAPHICS_API_VULKAN
@@ -48,10 +54,22 @@ struct SharedImage {
     VkImageAspectFlags aspect;
     uint32_t num_levels;
     uint32_t num_layers;
+
+    VkImageCreateInfo create_info;
+    uint64_t memory_size;
+    uint32_t memory_type_index;
 };
 
 struct RuntimeImage {
     VkImage image;
+};
+
+// used to store the results of exporting a SharedImage and reimporting into another VkDevice
+struct ImportedImage {
+    VkImage image;
+    VkDeviceMemory memory;
+    VkSemaphore rendering_done;
+    VkSemaphore copying_done;
 };
 
 struct SwapchainState {
@@ -367,7 +385,7 @@ private:
         return -1;
     }
 
-    std::tuple<VkSemaphore, xrtp_Handle> create_shared_semaphore() {
+    VkSemaphore create_exportable_semaphore() {
         VkResult result{};
 
         VkExportSemaphoreCreateInfo export_info{VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO};
@@ -386,25 +404,7 @@ private:
             throw std::runtime_error("Unable to create exportable semaphore: " + std::to_string(result));
         }
 
-        xrtp_Handle handle{};
-
-#ifdef _WIN32
-        #error TODO
-#else
-        VkSemaphoreGetFdInfoKHR get_fd_info{VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR};
-        get_fd_info.semaphore = semaphore;
-        get_fd_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
-
-        int fd{};
-        result = vk->GetSemaphoreFdKHR(saved_vk_device, &get_fd_info, &fd);
-        if (result != VK_SUCCESS) {
-            throw std::runtime_error("Unable to export FD for semaphore: " + std::to_string(result));
-        }
-
-        handle = static_cast<xrtp_Handle>(fd);
-#endif
-
-        return {semaphore, handle};
+        return semaphore;
     }
 
     VkCommandBuffer create_command_buffer() {
@@ -435,7 +435,163 @@ private:
         return fence;
     }
 
-    std::tuple<SharedImage, ImageHandles, uint64_t, uint32_t> create_image(
+    xrtp_Handle export_memory(VkDeviceMemory memory) {
+        VkResult vk_result{};
+
+        xrtp_Handle image_handle{};
+
+#ifdef _WIN32
+        #error TODO
+#else
+        VkMemoryGetFdInfoKHR get_fd_info{VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR};
+        get_fd_info.memory = memory;
+        get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+        int fd{};
+        vk_result = vk->GetMemoryFdKHR(saved_vk_device, &get_fd_info, &fd);
+        if (vk_result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to get memory fd: " + std::to_string(vk_result));
+        }
+
+        image_handle = static_cast<xrtp_Handle>(fd);
+#endif
+
+        return image_handle;
+    }
+
+    xrtp_Handle export_semaphore(VkSemaphore semaphore) {
+        VkResult vk_result{};
+
+        xrtp_Handle handle{};
+
+#ifdef _WIN32
+        #error TODO
+#else
+        VkSemaphoreGetFdInfoKHR get_fd_info{VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR};
+        get_fd_info.semaphore = semaphore;
+        get_fd_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+
+        int fd{};
+        vk_result = vk->GetSemaphoreFdKHR(saved_vk_device, &get_fd_info, &fd);
+        if (vk_result != VK_SUCCESS) {
+            throw std::runtime_error("Unable to export FD for semaphore: " + std::to_string(vk_result));
+        }
+
+        handle = static_cast<xrtp_Handle>(fd);
+#endif
+
+        return handle;
+    }
+
+    ImageHandles export_image_handles(const SharedImage& shared_image) {
+        ImageHandles result{};
+        result.memory_handle = export_memory(shared_image.shared_memory);
+        result.rendering_done_handle = export_semaphore(shared_image.rendering_done);
+        result.copying_done_handle = export_semaphore(shared_image.copying_done);
+
+        return result;
+    }
+
+    VkSemaphore import_semaphore(VkDevice device, xrtp_Handle handle) {
+        VkResult result{};
+
+        VkSemaphoreCreateInfo create_info{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+
+        VkSemaphore semaphore{};
+        result = vk->CreateSemaphore(device, &create_info, nullptr, &semaphore);
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create semaphore: " + std::to_string(result));
+        }
+
+    #ifdef _WIN32
+        #error TODO
+    #else
+        VkImportSemaphoreFdInfoKHR import_info{VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR};
+        import_info.semaphore = semaphore;
+        import_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT;
+        import_info.fd = static_cast<int>(handle);
+
+        result = vk->ImportSemaphoreFdKHR(device, &import_info);
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to import semaphore: " + std::to_string(result));
+        }
+    #endif
+
+        return semaphore;
+    }
+
+    // used to share image and semaphores into another device so that we can send Vulkan handles directly
+    // back to the client (gfxstream build)
+    ImportedImage import_image_into_device(const SharedImage& shared_image, VkDevice device) {
+        VkResult vk_result{};
+
+        ImageHandles image_handles = export_image_handles(shared_image);
+
+        VkExternalMemoryImageCreateInfo external_create_info{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO};
+#ifdef _WIN32
+        external_create_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+#else
+        external_create_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+#endif
+        
+        // copy saved VkImageCreateInfo
+        VkImageCreateInfo vk_create_info = shared_image.create_info;
+
+        vk_create_info.pNext = &external_create_info;
+        vk_create_info.usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+
+        VkImageAspectFlags aspect = get_aspect_from_format(vk_create_info.format);
+        uint32_t num_levels = vk_create_info.mipLevels;
+        uint32_t num_layers = vk_create_info.arrayLayers;
+
+        VkImage image{};
+        vk_result = vk->CreateImage(device, &vk_create_info, nullptr, &image);
+        if (vk_result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create VkImage: " + std::to_string(vk_result));
+        }
+
+#ifdef _WIN32
+        #error TODO
+#else
+        VkImportMemoryFdInfoKHR import_info{VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR};
+        import_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+        import_info.fd = image_handles.memory_handle;
+#endif
+
+        VkMemoryAllocateInfo alloc_info{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        alloc_info.pNext = &import_info;
+        alloc_info.allocationSize = shared_image.memory_size;
+        alloc_info.memoryTypeIndex = shared_image.memory_type_index;
+
+        VkDeviceMemory image_memory{};
+        vk_result = vk->AllocateMemory(device, &alloc_info, nullptr, &image_memory);
+        if (vk_result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to import memory from FD: " + std::to_string(vk_result));
+        }
+
+        vk_result = vk->BindImageMemory(device, image, image_memory, 0);
+        if (vk_result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to bind memory to image: " + std::to_string(vk_result));
+        }
+
+#ifdef _WIN32
+        #error Close handle if needed
+#else
+        // No need to close the FD, the driver closes it upon successful import.
+#endif
+
+        VkSemaphore rendering_done = import_semaphore(device, image_handles.rendering_done_handle);
+        VkSemaphore copying_done = import_semaphore(device, image_handles.copying_done_handle);
+
+        return ImportedImage{
+            .image = image,
+            .memory = image_memory,
+            .rendering_done = rendering_done,
+            .copying_done = copying_done
+        };
+    }
+
+    std::tuple<SharedImage, uint64_t, uint32_t> create_image(
         const XrSwapchainCreateInfo& create_info,
         const VkPhysicalDeviceMemoryProperties& memory_properties,
         VkMemoryPropertyFlags required_flags
@@ -500,26 +656,8 @@ private:
             throw std::runtime_error("Failed to bind memory to image: " + std::to_string(vk_result));
         }
 
-        xrtp_Handle image_handle{};
-
-#ifdef _WIN32
-        #error TODO
-#else
-        VkMemoryGetFdInfoKHR get_fd_info{VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR};
-        get_fd_info.memory = memory;
-        get_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
-
-        int fd{};
-        vk_result = vk->GetMemoryFdKHR(saved_vk_device, &get_fd_info, &fd);
-        if (vk_result != VK_SUCCESS) {
-            throw std::runtime_error("Failed to get memory fd: " + std::to_string(vk_result));
-        }
-
-        image_handle = static_cast<xrtp_Handle>(fd);
-#endif
-
-        auto [rendering_done, rendering_done_handle] = create_shared_semaphore();
-        auto [copying_done, copying_done_handle] = create_shared_semaphore();
+        auto rendering_done = create_exportable_semaphore();
+        auto copying_done = create_exportable_semaphore();
 
         auto command_buffer = create_command_buffer();
         auto command_buffer_fence = create_signaled_fence();
@@ -534,24 +672,20 @@ private:
                 .command_buffer_fence = command_buffer_fence,
                 .aspect = aspect,
                 .num_levels = num_levels,
-                .num_layers = num_layers
-            },
-            ImageHandles{
-                .memory_handle = image_handle,
-                .rendering_done_handle = rendering_done_handle,
-                .copying_done_handle = copying_done_handle
+                .num_layers = num_layers,
+                .create_info = image_create_info,
+                .memory_size = alloc_info.allocationSize,
+                .memory_type_index = alloc_info.memoryTypeIndex
             },
             memory_requirements.size,
             memory_type_index
         };
     }
 
-    // TODO: might need to select and format that allows export
     SwapchainState& create_swapchain_state(
         SessionState& session_state,
         const XrSwapchainCreateInfo& create_info,
         XrSwapchain handle,
-        std::vector<ImageHandles>& handles_out,
         uint64_t& memory_size_out,
         uint32_t& memory_type_index_out
     ) {
@@ -576,8 +710,6 @@ private:
         std::vector<RuntimeImage> runtime_images;
         runtime_images.reserve(num_images);
 
-        handles_out.reserve(num_images);
-
         VkPhysicalDeviceMemoryProperties memory_properties{};
         vk->GetPhysicalDeviceMemoryProperties(saved_vk_physical_device, &memory_properties);
 
@@ -589,7 +721,7 @@ private:
         bool is_static = (create_info.createFlags & XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT) != 0;
 
         for (uint32_t i = 0; i < num_images; i++) {
-            auto [shared_image, image_handles, memory_size, memory_type_index] = create_image(
+            auto [shared_image, memory_size, memory_type_index] = create_image(
                 create_info,
                 memory_properties,
                 required_flags
@@ -598,8 +730,6 @@ private:
             shared_images.emplace_back(std::move(shared_image));
 
             runtime_images.emplace_back(RuntimeImage{runtime_image_structs[i].image});
-
-            handles_out.emplace_back(std::move(image_handles));
 
             // just overwrite these values for each image because they should be the same
             assert(i == 0 || (memory_size_out == memory_size && memory_type_index_out == memory_type_index));
@@ -672,26 +802,28 @@ private:
 
         SessionState& session_state = get_session_state(session_handle).value();
 
-        std::vector<ImageHandles> handles;
-
         uint64_t memory_size{};
         uint32_t memory_type_index{};
 
-        create_swapchain_state(
+        SwapchainState& swapchain_state = create_swapchain_state(
             session_state,
             *create_info,
             swapchain_handle,
-            handles,
             memory_size,
             memory_type_index
         );
 
-        for (auto image_handles : handles) {
+        // gfxstream build doesn't use handle exchange
+#ifndef XRTRANSPORT_BUILD_FOR_GFXSTREAM
+        for (const auto& shared_image : swapchain_state.shared_images) {
+            auto image_handles = export_image_handles(shared_image);
+
             // xrtp_write_handle should take care of closing our copy of the handle
             write_image_handles(image_handles);
         }
+#endif
 
-        uint32_t num_images = static_cast<uint32_t>(handles.size());
+        uint32_t num_images = static_cast<uint32_t>(swapchain_state.shared_images.size());
 
         auto msg_out = transport.start_message(XRTP_MSG_VULKAN2_CREATE_SWAPCHAIN_RETURN);
         SerializeContext s_ctx(msg_out.buffer);
@@ -961,6 +1093,54 @@ private:
         msg_out.flush();
     }
 
+    void handle_get_swapchain_image_handles(MessageLockIn msg_in) {
+        VkDevice boxed_vk_device{};
+        XrSwapchain swapchain_handle{};
+
+        DeserializeContext d_ctx(msg_in.buffer);
+        deserialize(&boxed_vk_device, d_ctx);
+        deserialize(&swapchain_handle, d_ctx);
+
+#ifdef XRTRANSPORT_BUILD_FOR_GFXSTREAM
+        uint32_t ok = 1;
+
+        auto msg_out = transport.start_message(XRTP_MSG_VULKAN2_RETURN_SWAPCHAIN_IMAGE_HANDLES);
+        SerializeContext s_ctx(msg_out.buffer);
+        serialize(&ok, s_ctx);
+
+        // unbox from guest handle space to real handle
+        VkDevice vk_device = unbox_VkDevice(boxed_vk_device);
+
+        SwapchainState& swapchain_state = get_swapchain_state(swapchain_handle).value();
+        for (const auto& shared_image : swapchain_state.shared_images) {
+            // import image and semaphores into provided VkDevice
+            ImportedImage imported_image = import_image_into_device(shared_image, vk_device);
+
+            // box imported handles into guest handle space
+            VkImage image = new_boxed_non_dispatchable_VkImage(imported_image.image);
+            VkDeviceMemory memory = new_boxed_non_dispatchable_VkDeviceMemory(imported_image.memory);
+            VkSemaphore rendering_done = new_boxed_non_dispatchable_VkSemaphore(imported_image.rendering_done);
+            VkSemaphore copying_done = new_boxed_non_dispatchable_VkSemaphore(imported_image.copying_done);
+
+            serialize(&image, s_ctx);
+            serialize(&memory, s_ctx);
+            serialize(&rendering_done, s_ctx);
+            serialize(&copying_done, s_ctx);
+        }
+
+        msg_out.flush();
+
+#else // XRTRANSPORT_BUILD_FOR_GFXSTREAM
+        // we don't allow this command on the default build
+        uint32_t ok = 0;
+
+        auto msg_out = transport.start_message(XRTP_MSG_VULKAN2_RETURN_SWAPCHAIN_IMAGE_HANDLES);
+        SerializeContext s_ctx(msg_out.buffer);
+        serialize(&ok, s_ctx);
+        msg_out.flush();
+#endif
+    }
+
 public:
     VulkanServerModule(xrtp_Transport transport_handle, FunctionLoader* p_function_loader)
     : transport(transport_handle),
@@ -994,6 +1174,11 @@ public:
             XRTP_MSG_VULKAN2_RELEASE_SWAPCHAIN_IMAGE,
             [this](MessageLockIn msg_in) {
                 handle_release_swapchain_image(std::move(msg_in));
+            });
+        transport.register_handler(
+            XRTP_MSG_VULKAN2_GET_SWAPCHAIN_IMAGE_HANDLES,
+            [this](MessageLockIn msg_in) {
+                handle_get_swapchain_image_handles(std::move(msg_in));
             });
     }
 

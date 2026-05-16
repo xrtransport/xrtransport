@@ -7,6 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(XRTRANSPORT_BUILD_CLIENT "Build client" ON)
 option(XRTRANSPORT_BUILD_SERVER "Build server" ON)
+option(XRTRANSPORT_BUILD_SERVER_EXECUTABLE "Build server executable" ON)
 option(XRTRANSPORT_BUILD_TESTS "Build tests" ON)
 option(XRTRANSPORT_CREATE_MANIFEST "Create OpenXR Manifest" ON)
 set(XRTRANSPORT_CLIENT_INSTALL_PATH client CACHE STRING
@@ -21,6 +22,13 @@ option(XRTRANSPORT_BUILD_FOR_GFXSTREAM "Build client and server for integration 
 # gfxstream and dynamic modules are mutually exclusive
 if(XRTRANSPORT_DYNAMIC_MODULES AND XRTRANSPORT_BUILD_FOR_GFXSTREAM)
     message(FATAL_ERROR "Dynamic modules are not allowed for the gfxstream build")
+endif()
+
+if(XRTRANSPORT_BUILD_FOR_GFXSTREAM)
+    set(XRTRANSPORT_BUILD_CLIENT OFF)
+    set(XRTRANSPORT_BUILD_SERVER ON)
+    set(XRTRANSPORT_BUILD_SERVER_EXECUTABLE OFF)
+    set(XRTRANSPORT_BUILD_TESTS OFF)
 endif()
 
 if (XRTRANSPORT_DYNAMIC_MODULES)

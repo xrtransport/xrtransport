@@ -3,18 +3,22 @@
 cmake_minimum_required(VERSION 3.15)
 
 if(NOT XRTRANSPORT_DYNAMIC_MODULES)
-    add_library(static_client_modules STATIC
-        static_client_modules.cpp
-    )
-    target_include_directories(static_client_modules PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-    add_library(static_server_modules STATIC
-        static_server_modules.cpp
-    )
-    target_include_directories(static_server_modules PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-    )
+    if(XRTRANSPORT_BUILD_CLIENT)
+        add_library(static_client_modules STATIC
+            static_client_modules.cpp
+        )
+        target_include_directories(static_client_modules PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+    endif()
+    if(XRTRANSPORT_BUILD_SERVER)
+        add_library(static_server_modules STATIC
+            static_server_modules.cpp
+        )
+        target_include_directories(static_server_modules PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+    endif()
 endif()
 
 option(XRTRANSPORT_BUILD_MODULE_HANDLE_EXCHANGE "Build Handle Exchange Module" ON)
@@ -35,22 +39,30 @@ if(XRTRANSPORT_BUILD_MODULE_HANDLE_EXCHANGE)
     add_subdirectory(${HANDLE_EXCHANGE_DIR})
 
     if(NOT XRTRANSPORT_DYNAMIC_MODULES)
-        target_compile_definitions(static_client_modules PRIVATE XRTRANSPORT_BUILD_MODULE_HANDLE_EXCHANGE)
-        target_link_libraries(static_client_modules PUBLIC module_client_handle_exchange)
+        if(XRTRANSPORT_BUILD_CLIENT)
+            target_compile_definitions(static_client_modules PRIVATE XRTRANSPORT_BUILD_MODULE_HANDLE_EXCHANGE)
+            target_link_libraries(static_client_modules PUBLIC module_client_handle_exchange)
+        endif()
 
-        target_compile_definitions(static_server_modules PRIVATE XRTRANSPORT_BUILD_MODULE_HANDLE_EXCHANGE)
-        target_link_libraries(static_server_modules PUBLIC module_server_handle_exchange)
+        if(XRTRANSPORT_BUILD_SERVER)
+            target_compile_definitions(static_server_modules PRIVATE XRTRANSPORT_BUILD_MODULE_HANDLE_EXCHANGE)
+            target_link_libraries(static_server_modules PUBLIC module_server_handle_exchange)
+        endif()
     endif()
 endif()
 if(XRTRANSPORT_BUILD_MODULE_VULKAN)
     add_subdirectory(vulkan)
 
     if(NOT XRTRANSPORT_DYNAMIC_MODULES)
-        target_compile_definitions(static_client_modules PRIVATE XRTRANSPORT_BUILD_MODULE_VULKAN)
-        target_link_libraries(static_client_modules PUBLIC module_client_vulkan)
+        if(XRTRANSPORT_BUILD_CLIENT)
+            target_compile_definitions(static_client_modules PRIVATE XRTRANSPORT_BUILD_MODULE_VULKAN)
+            target_link_libraries(static_client_modules PUBLIC module_client_vulkan)
+        endif()
 
-        target_compile_definitions(static_server_modules PRIVATE XRTRANSPORT_BUILD_MODULE_VULKAN)
-        target_link_libraries(static_server_modules PUBLIC module_server_vulkan)
+        if(XRTRANSPORT_BUILD_SERVER)
+            target_compile_definitions(static_server_modules PRIVATE XRTRANSPORT_BUILD_MODULE_VULKAN)
+            target_link_libraries(static_server_modules PUBLIC module_server_vulkan)
+        endif()
     endif()
 endif()
 
